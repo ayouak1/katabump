@@ -463,22 +463,30 @@ async function attemptTurnstileCdp(page) {
                         if (box) await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 5 });
                     } catch (e) { }
 
-                    // B. 找 Turnstile (小重试)
-                    console.log('Checking for Turnstile (using CDP bypass)...');
-                    let cdpClickResult = false;
-                    for (let findAttempt = 0; findAttempt < 30; findAttempt++) {
-                        cdpClickResult = await attemptTurnstileCdp(page);
-                        if (cdpClickResult) break;
-                        console.log(`   >> [Find Attempt ${findAttempt + 1}/30] Turnstile checkbox not found yet...`);
-                        await page.waitForTimeout(1000);
-                    }
-
-                    let isTurnstileSuccess = false;
-                    if (cdpClickResult) {
-                        console.log('   >> CDP Click active. Waiting 8s for Cloudflare check...');
-                        await page.waitForTimeout(8000);
+                    // B. 找 ALTCHA 或 Turnstile
+                    console.log('Checking for Verification (ALTCHA or Turnstile)...');
+                    const altchaWidget = modal.locator('altcha-widget');
+                    if (await altchaWidget.isVisible()) {
+                        console.log('>> Found ALTCHA widget! Attempting to click...');
+                        const checkbox = altchaWidget.locator('input[type="checkbox"]');
+                        await checkbox.click();
+                        console.log('>> ALTCHA checkbox clicked. Waiting 5s for Proof of Work calculation...');
+                        await page.waitForTimeout(5000);
                     } else {
-                        console.log('   >> Turnstile checkbox not confirmed after retries.');
+                        // fallback to Turnstile
+                        let cdpClickResult = false;
+                        for (let findAttempt = 0; findAttempt < 30; findAttempt++) {
+                            cdpClickResult = await attemptTurnstileCdp(page);
+                            if (cdpClickResult) break;
+                            console.log(`   >> [Find Attempt ${findAttempt + 1}/30] Turnstile checkbox not found yet...`);
+                            await page.waitForTimeout(1000);
+                        }
+                        if (cdpClickResult) {
+                            console.log('   >> CDP Click active. Waiting 8s for Cloudflare check...');
+                            await page.waitForTimeout(8000);
+                        } else {
+                            console.log('   >> Turnstile checkbox not confirmed after retries.');
+                        }
                     }
 
                     // C. 检查 Success 标志
