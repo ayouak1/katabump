@@ -194,9 +194,11 @@ async function launchChrome() {
     args.push('--disable-dev-shm-usage'); // 避免共享内存不足
 
 
+    const fs = require('fs');
+    const logStream = fs.createWriteStream('/tmp/chrome_startup.log');
     const chrome = spawn(CHROME_PATH, args, {
         detached: true,
-        stdio: 'ignore'
+        stdio: ['ignore', logStream, logStream]
     });
     chrome.unref();
 
@@ -208,6 +210,10 @@ async function launchChrome() {
 
     if (!await checkPort(DEBUG_PORT)) {
         console.error('Chrome 无法在端口 ' + DEBUG_PORT + ' 上启动');
+        if (fs.existsSync('/tmp/chrome_startup.log')) {
+            console.log('--- Chrome 启动错误日志 ---');
+            console.log(fs.readFileSync('/tmp/chrome_startup.log', 'utf8'));
+        }
         throw new Error('Chrome 启动失败');
     }
 }
