@@ -544,7 +544,22 @@ async function attemptTurnstileCdp(page) {
                                     const text = await notTimeLoc.innerText();
                                     const match = text.match(/as of\s+(.*?)\s+\(/);
                                     let dateStr = match ? match[1] : 'Unknown Date';
-                                    console.log(`   >> ⏳ 暂无法续期。下次可用时间: ${dateStr}`);
+                                    
+                                    // 转换为中文日期
+                                    const monthMap = {
+                                        'January': '1月', 'February': '2月', 'March': '3月', 'April': '4月',
+                                        'May': '5月', 'June': '6月', 'July': '7月', 'August': '8月',
+                                        'September': '9月', 'October': '10月', 'November': '11月', 'December': '12月'
+                                    };
+                                    let displayDate = dateStr;
+                                    const parts = dateStr.trim().split(/\s+/);
+                                    if (parts.length === 2) {
+                                        const day = parseInt(parts[0], 10);
+                                        const monthChi = monthMap[parts[1]];
+                                        if (monthChi) displayDate = `${monthChi}${day}日`;
+                                    }
+                                    
+                                    console.log(`   >> ⏳ 暂无法续期。下次可用时间: ${displayDate}`);
 
                                     // 截图证明
                                     const fs = require('fs');
@@ -555,7 +570,7 @@ async function attemptTurnstileCdp(page) {
                                     const skipShotPath = path.join(photoDir, `${safeUser}_skip.png`);
                                     try { await page.screenshot({ path: skipShotPath, fullPage: true }); } catch (e) { }
 
-                                    await sendTelegramMessage(`⏳ *暂无法续期 (跳过)*\n用户: ${user.username}\n原因: 还没到时间\n下次可用: ${dateStr}`, skipShotPath);
+                                    await sendTelegramMessage(`⏳ *暂无法续期 (跳过)*\n用户: ${user.username}\n原因: 还没到时间\n下次可用: ${displayDate}`, skipShotPath);
 
                                     renewSuccess = true; // Mark as done to stop retries
                                     try {
