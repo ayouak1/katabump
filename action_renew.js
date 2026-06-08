@@ -198,8 +198,10 @@ async function launchChrome() {
     const logStream = fs.createWriteStream('/tmp/chrome_startup.log');
     const chrome = spawn(CHROME_PATH, args, {
         detached: true,
-        stdio: ['ignore', logStream, logStream]
+        stdio: ['ignore', 'pipe', 'pipe']
     });
+    chrome.stdout.pipe(logStream);
+    chrome.stderr.pipe(logStream);
     chrome.unref();
 
     console.log('正在等待 Chrome 初始化...');
