@@ -134,7 +134,7 @@ async function checkProxy() {
 // 辅助函数：检测端口是否开放
 function checkPort(port) {
     return new Promise((resolve) => {
-        const req = http.get(`http://localhost:${port}/json/version`, (res) => {
+        const req = http.get(`http://127.0.0.1:${port}/json/version`, (res) => {
             resolve(true);
         });
         req.on('error', () => resolve(false));
@@ -149,6 +149,9 @@ async function launchNativeChrome() {
         console.log('Chrome is already open.');
         return;
     }
+
+    // 清除可能导致 Chrome 崩溃的无效 DBUS 地址
+    delete process.env.DBUS_SESSION_BUS_ADDRESS;
 
     console.log('Launching native Chrome...');
     const args = [
@@ -287,7 +290,7 @@ async function attemptTurnstileCdp(page) {
     let browser;
     for (let k = 0; k < 5; k++) {
         try {
-            browser = await chromium.connectOverCDP(`http://localhost:${DEBUG_PORT}`);
+            browser = await chromium.connectOverCDP(`http://127.0.0.1:${DEBUG_PORT}`);
             console.log('Successfully connected!');
             break;
         } catch (e) {
