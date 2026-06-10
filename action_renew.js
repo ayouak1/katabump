@@ -182,6 +182,7 @@ async function launchChrome() {
         '--no-first-run',
         '--no-default-browser-check',
         '--headless=new',
+        '--user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
         '--disable-gpu',
         '--window-size=1280,720',
         '--no-sandbox',
@@ -435,6 +436,23 @@ async function attemptTurnstileCdp(page) {
                 await page.getByRole('link', { name: 'See' }).first().click();
             } catch (e) {
                 console.log('未找到 "See" 按钮。');
+
+                // 保存失败截图并发送 Telegram 消息以供排错
+                const fs = require('fs');
+                const path = require('path');
+                const photoDir = path.join(process.cwd(), 'screenshots');
+                if (!fs.existsSync(photoDir)) fs.mkdirSync(photoDir, { recursive: true });
+                const safeUser = user.username.replace(/[^a-z0-9]/gi, '_');
+                const errorShotPath = path.join(photoDir, `${safeUser}_login_failed.png`);
+                try {
+                    await page.screenshot({ path: errorShotPath, fullPage: true });
+                    console.log(`已保存登录失败截图: ${errorShotPath}`);
+                } catch (screenshotErr) {
+                    console.log('保存登录失败截图失败:', screenshotErr.message);
+                }
+                
+                await sendTelegramMessage(`❌ *登录或跳转失败*\n用户: ${user.username}\n原因: 未找到 "See" 按钮 (请检查下方截图确认是否卡在验证码或密码错误)`, errorShotPath);
+
                 continue;
             }
 
