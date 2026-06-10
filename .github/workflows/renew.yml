@@ -20,8 +20,6 @@ jobs:
         
     - name: Install Dependencies
       run: |
-        sudo apt-get update
-        sudo apt-get install -y xvfb
         npm install
         npx playwright install-deps chrome
       
@@ -33,8 +31,8 @@ jobs:
         HTTP_PROXY: ${{ secrets.HTTP_PROXY }}
         TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
         TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-      # 使用 xvfb-run 模拟有头环境运行
-      run: xvfb-run --auto-servernum --server-args="-screen 0 1280x720x24" node action_renew.js
+      # 直接以新版无头模式运行，无需 xvfb-run 依赖
+      run: node action_renew.js
 
     - name: Upload Screenshots
       if: always()

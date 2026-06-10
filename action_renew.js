@@ -181,7 +181,7 @@ async function launchChrome() {
         `--remote-debugging-port=${DEBUG_PORT}`,
         '--no-first-run',
         '--no-default-browser-check',
-        // '--headless=new', // (已被注释) 使用 xvfb-run 时不需要 headless 模式，这样可以模拟有头浏览器增加成功率
+        '--headless=new',
         '--disable-gpu',
         '--window-size=1280,720',
         '--no-sandbox',
