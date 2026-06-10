@@ -181,7 +181,7 @@ async function launchChrome() {
         `--remote-debugging-port=${DEBUG_PORT}`,
         '--no-first-run',
         '--no-default-browser-check',
-        '--headless=new',
+        // '--headless=new', // (重新注释) 回归有头模式以通过 Cloudflare Turnstile 验证
         '--user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
         '--disable-blink-features=AutomationControlled',
         '--disable-gpu',
