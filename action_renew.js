@@ -129,29 +129,37 @@ async function checkProxy() {
     if (!PROXY_CONFIG) return true;
 
     console.log('[代理] 正在验证代理连接...');
-    try {
-        const axiosConfig = {
-            proxy: {
-                protocol: 'http',
-                host: new URL(PROXY_CONFIG.server).hostname,
-                port: new URL(PROXY_CONFIG.server).port,
-            },
-            timeout: 10000
-        };
-
-        if (PROXY_CONFIG.username && PROXY_CONFIG.password) {
-            axiosConfig.proxy.auth = {
-                username: PROXY_CONFIG.username,
-                password: PROXY_CONFIG.password
+    const maxRetries = 3;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            const axiosConfig = {
+                proxy: {
+                    protocol: 'http',
+                    host: new URL(PROXY_CONFIG.server).hostname,
+                    port: new URL(PROXY_CONFIG.server).port,
+                },
+                timeout: 10000
             };
-        }
 
-        await axios.get('https://www.google.com', axiosConfig);
-        console.log('[代理] 连接成功！');
-        return true;
-    } catch (error) {
-        console.error(`[代理] 连接失败: ${error.message}`);
-        return false;
+            if (PROXY_CONFIG.username && PROXY_CONFIG.password) {
+                axiosConfig.proxy.auth = {
+                    username: PROXY_CONFIG.username,
+                    password: PROXY_CONFIG.password
+                };
+            }
+
+            await axios.get('https://www.google.com', axiosConfig);
+            console.log('[代理] 连接成功！');
+            return true;
+        } catch (error) {
+            console.warn(`[代理] 连接尝试 ${attempt}/${maxRetries} 失败: ${error.message}`);
+            if (attempt < maxRetries) {
+                await new Promise(r => setTimeout(r, 3000));
+            } else {
+                console.error(`[代理] 经过 ${maxRetries} 次尝试，代理依然不可用。`);
+                return false;
+            }
+        }
     }
 }
 
@@ -296,8 +304,8 @@ async function attemptTurnstileCdp(page) {
     if (PROXY_CONFIG) {
         const isValid = await checkProxy();
         if (!isValid) {
-            console.error('[代理] 代理无效，终止运行。');
-            process.exit(1);
+            console.warn('[代理] 代理最终无效！为了避免续约任务中断，将退回到直连模式运行...');
+            PROXY_CONFIG = null; // 清除配置，Chrome 和 Playwright 将自动改走直连
         }
     }
 
