@@ -31,12 +31,16 @@ jobs:
     - name: Install Node Dependencies
       run: npm ci || npm install
 
+    - name: Install Playwright Chromium
+      run: npx playwright install chromium
+
     - name: Run Renew Script
       env:
         USERS_JSON: ${{ secrets.USERS_JSON }}
         HTTP_PROXY: ${{ secrets.HTTP_PROXY }}
         TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
         TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+        KATABUMP_COOKIES: ${{ secrets.KATABUMP_COOKIES }}
         NO_PROXY: localhost,127.0.0.1
       run: dbus-run-session -- xvfb-run --auto-servernum --server-args="-screen 0 1280x720x24" node action_renew.js
 
