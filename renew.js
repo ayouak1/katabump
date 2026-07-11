@@ -276,41 +276,35 @@ async function attemptTurnstileCdp(page) {
         }
     }
 
-    await launchNativeChrome();
+    console.log('Launching Chrome with persistent context...');
+    const launchArgs = [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-gpu',
+        '--window-size=1280,720'
+    ];
 
-    console.log(`Connecting to Chrome instance...`);
-    let browser;
-    for (let k = 0; k < 5; k++) {
-        try {
-            browser = await chromium.connectOverCDP(`http://127.0.0.1:${DEBUG_PORT}`);
-            console.log('Successfully connected!');
-            break;
-        } catch (e) {
-            console.log(`Connection attempt ${k + 1} failed. Retrying in 2s...`);
-            await new Promise(r => setTimeout(r, 2000));
+    const launchOptions = {
+        executablePath: CHROME_PATH,
+        headless: HEADLESS,
+        args: launchArgs
+    };
+
+    if (PROXY_CONFIG) {
+        launchOptions.proxy = {
+            server: PROXY_CONFIG.server
+        };
+        if (PROXY_CONFIG.username && PROXY_CONFIG.password) {
+            launchOptions.proxy.username = PROXY_CONFIG.username;
+            launchOptions.proxy.password = PROXY_CONFIG.password;
         }
     }
 
-    if (!browser) {
-        console.error('Failed to connect. Exiting.');
-        return;
-    }
-
-    const context = browser.contexts()[0];
+    const context = await chromium.launchPersistentContext(USER_DATA_DIR, launchOptions);
+    console.log('Chrome launched successfully!');
+    
     let page = context.pages().length > 0 ? context.pages()[0] : await context.newPage();
     page.setDefaultTimeout(60000);
-
-    // --- 代理认证处理 ---
-    if (PROXY_CONFIG && PROXY_CONFIG.username) {
-        console.log('[Proxy] Setting up authentication...');
-        await context.setHTTPCredentials({
-            username: PROXY_CONFIG.username,
-            password: PROXY_CONFIG.password
-        });
-    } else {
-        // 如果没有代理(或者代理无认证)，清除之前的认证信息，防止干扰
-        await context.setHTTPCredentials(null);
-    }
 
     // --- 关键：注入 Hook 脚本 ---
     // 这会在每次页面加载/导航前执行，确保能拦截到 Turnstile 的创建
@@ -624,6 +618,7 @@ async function attemptTurnstileCdp(page) {
     }
 
     console.log('All users processed.');
-    console.log('Closing browser connection.');
-    await browser.close();
+    console.log('Closing browser context.');
+    await context.close();
+    process.exit(0);
 })();

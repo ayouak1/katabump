@@ -326,39 +326,38 @@ async function attemptTurnstileCdp(page) {
         }
     }
 
-    await launchChrome();
+    console.log('正在启动并初始化 Chrome (Persistent Context)...');
+    const launchArgs = [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-gpu',
+        '--window-size=1280,720',
+        '--disable-dev-shm-usage',
+        '--no-first-run',
+        '--no-default-browser-check'
+    ];
 
-    console.log(`正在连接 Chrome...`);
-    let browser;
-    for (let k = 0; k < 5; k++) {
-        try {
-            browser = await chromium.connectOverCDP(`http://127.0.0.1:${DEBUG_PORT}`);
-            console.log('连接成功！');
-            break;
-        } catch (e) {
-            console.log(`连接尝试 ${k + 1} 失败。2秒后重试...`);
-            await new Promise(r => setTimeout(r, 2000));
+    const launchOptions = {
+        executablePath: CHROME_PATH,
+        headless: false,
+        args: launchArgs
+    };
+
+    if (PROXY_CONFIG) {
+        launchOptions.proxy = {
+            server: PROXY_CONFIG.server
+        };
+        if (PROXY_CONFIG.username && PROXY_CONFIG.password) {
+            launchOptions.proxy.username = PROXY_CONFIG.username;
+            launchOptions.proxy.password = PROXY_CONFIG.password;
         }
     }
 
-    if (!browser) {
-        console.error('连接失败。退出。');
-        process.exit(1);
-    }
-
-    const context = browser.contexts()[0];
+    const context = await chromium.launchPersistentContext('/tmp/chrome_user_data', launchOptions);
+    console.log('Chrome 启动成功！');
+    
     let page = context.pages().length > 0 ? context.pages()[0] : await context.newPage();
     page.setDefaultTimeout(60000);
-
-    if (PROXY_CONFIG && PROXY_CONFIG.username) {
-        console.log('[代理] 正在设置认证...');
-        await context.setHTTPCredentials({
-            username: PROXY_CONFIG.username,
-            password: PROXY_CONFIG.password
-        });
-    } else {
-        await context.setHTTPCredentials(null);
-    }
 
     // await page.addInitScript(INJECTED_SCRIPT);
     // console.log('注入脚本已添加。');
@@ -704,6 +703,6 @@ async function attemptTurnstileCdp(page) {
     }
 
     console.log('完成。');
-    await browser.close();
+    await context.close();
     process.exit(0);
 })();
