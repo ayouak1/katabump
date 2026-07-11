@@ -108,6 +108,77 @@ class KataBumpRenew:
         self.driver = None
         self.screenshot_path = None
 
+def create_proxy_extension(proxy_url):
+    """创建包含认证信息的代理插件以绕过 Chrome 不支持命令行代理认证的问题"""
+    import zipfile
+    # 匹配 scheme://username:password@host:port 或 scheme://host:port
+    match = re.match(r'^(https?|socks5)://(?:([^:]+):([^@]+)@)?([^:]+):(\d+)$', proxy_url, re.I)
+    if not match:
+        return None
+    scheme, username, password, host, port = match.groups()
+    if not username:
+        return None  # 无认证，使用常规 --proxy-server 即可
+
+    manifest_json = """
+    {
+        "version": "1.0.0",
+        "manifest_version": 2,
+        "name": "Chrome Proxy",
+        "permissions": [
+            "proxy",
+            "tabs",
+            "unlimitedStorage",
+            "storage",
+            "<all_urls>",
+            "webRequest",
+            "webRequestBlocking"
+        ],
+        "background": {
+            "scripts": ["background.js"]
+        },
+        "minimum_chrome_version":"22.0.0"
+    }
+    """
+
+    background_js = f"""
+    var config = {{
+        mode: "fixed_servers",
+        rules: {{
+          singleProxy: {{
+            scheme: "{scheme}",
+            host: "{host}",
+            port: parseInt({port})
+          }},
+          bypassList: []
+        }}
+      }};
+
+    chrome.proxy.settings.set({{value: config, scope: "regular"}}, function({{}});
+
+    chrome.webRequest.onAuthRequired.addListener(
+        function(details) {{
+            return {{
+                authCredentials: {{
+                    username: "{username}",
+                    password: "{password}"
+                }}
+            }};
+        }},
+        {{urls: ["<all_urls>"]}},
+        ['blocking']
+    );
+    """
+
+    ext_path = os.path.join(os.getcwd(), 'proxy_auth_ext.zip')
+    try:
+        with zipfile.ZipFile(ext_path, 'w') as zip_file:
+            zip_file.writestr("manifest.json", manifest_json)
+            zip_file.writestr("background.js", background_js)
+        return ext_path
+    except Exception as e:
+        logger.warning(f"创建代理插件失败: {e}")
+        return None
+
     def setup_driver(self):
         opts = Options()
         if HEADLESS:
@@ -117,7 +188,11 @@ class KataBumpRenew:
         opts.add_argument('--disable-blink-features=AutomationControlled')
         opts.add_argument('--remote-debugging-port=9222')
         if PROXY_SERVER:
-            opts.add_argument(f'--proxy-server={PROXY_SERVER}')
+            ext_path = create_proxy_extension(PROXY_SERVER)
+            if ext_path:
+                opts.add_argument(f'--load-extension={ext_path}')
+            else:
+                opts.add_argument(f'--proxy-server={PROXY_SERVER}')
 
         v_main = get_chrome_major_version()
         logger.info(f"🛠 驱动初始化 - Chrome 大版本: {v_main or '自动'}")
@@ -475,6 +550,12 @@ def main():
                 err_shot = err_path
                 break
                 
+    # 清理代理插件压缩包
+    ext_path = os.path.join(os.getcwd(), 'proxy_auth_ext.zip')
+    if os.path.exists(ext_path):
+        try: os.remove(ext_path)
+        except: pass
+
     send_tg(summary, err_shot)
     sys.exit(0 if success_count == len(accounts) else 1)
 
