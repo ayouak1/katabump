@@ -201,7 +201,6 @@ class KataBumpRenew:
         sb_args = {
             "uc": True,
             "headless": HEADLESS,
-            "rt": 3,  # Reconnect attempts
         }
         if PROXY_SERVER:
             # SeleniumBase 支持直接传递代理参数，格式 --proxy=user:pass@host:port
