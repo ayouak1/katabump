@@ -281,30 +281,29 @@ async function attemptTurnstileCdp(page) {
                     continue;
                 }
 
-                // 标准 Turnstile 验证码框的复选框固定在左侧约 7% 宽度处，垂直居中
-                const data = { xRatio: 0.07, yRatio: 0.5 };
-                const clickX = box.x + (box.width * data.xRatio);
-                const clickY = box.y + (box.height * data.yRatio);
+                // 候选的 x 坐标比例，11% 为标准居中，8% 和 14% 为左右热区，确保 100% 击中复选框圆圈
+                const candidates = [
+                    { xRatio: 0.11, yRatio: 0.5 },
+                    { xRatio: 0.08, yRatio: 0.5 },
+                    { xRatio: 0.14, yRatio: 0.5 }
+                ];
 
-                console.log(`>> 视口点击目标坐标: (${clickX.toFixed(2)}, ${clickY.toFixed(2)})`);
+                console.log('>> 开始对复选框区域进行多点候选仿真点击...');
+                for (const candidate of candidates) {
+                    const clickX = box.width * candidate.xRatio;
+                    const clickY = box.height * candidate.yRatio;
+                    console.log(`>> 尝试点击 iframe 内相对坐标: (${clickX.toFixed(2)}, ${clickY.toFixed(2)})`);
 
-                // 1. 模拟鼠标从随机位置滑入
-                const startX = 100 + Math.random() * 200;
-                const startY = 100 + Math.random() * 200;
-                await page.mouse.move(startX, startY);
-                await page.waitForTimeout(100 + Math.random() * 100);
+                    await iframeElement.click({
+                        position: { x: clickX, y: clickY },
+                        delay: 50 + Math.random() * 50
+                    });
 
-                // 2. 平滑滑动到目标坐标 (通过 steps 模拟阻尼)
-                const steps = 12 + Math.floor(Math.random() * 5);
-                await page.mouse.move(clickX, clickY, { steps });
-                await page.waitForTimeout(200 + Math.random() * 200);
+                    // 每次点击后稍微等待，观察 Cloudflare 是否成功响应
+                    await page.waitForTimeout(1000);
+                }
 
-                // 3. 物理按压与释放
-                await page.mouse.down();
-                await page.waitForTimeout(50 + Math.random() * 100);
-                await page.mouse.up();
-
-                console.log('>> Playwright 仿真平滑点击已发送。');
+                console.log('>> 所有候选点点击发送完成。');
                 return true;
             }
         } catch (e) { }
