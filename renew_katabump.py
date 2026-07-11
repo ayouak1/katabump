@@ -22,12 +22,18 @@ from selenium.common.exceptions import TimeoutException, WebDriverException
 os.environ['NO_PROXY'] = 'localhost,127.0.0.1'
 HEADLESS = os.getenv('HEADLESS', 'false').lower() == 'true'
 ACCOUNTS_ENV = os.getenv('USERS_JSON', os.getenv('ACCOUNTS', ''))
-PROXY_SERVER = os.getenv('HTTP_PROXY', os.getenv('HTTPS_PROXY', ''))
 TG_BOT_TOKEN = os.getenv('TG_BOT_TOKEN', os.getenv('BOT_TOKEN', ''))
 TG_CHAT_ID = os.getenv('TG_CHAT_ID', os.getenv('CHAT_ID', ''))
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+# GHA 环境判定：如果在 GitHub Actions 中运行，忽略代理使用 Azure 优质高信誉原生 IP 绕过 CF 验证
+IS_GHA = os.getenv('GITHUB_ACTIONS') == 'true'
+PROXY_SERVER = os.getenv('HTTP_PROXY', os.getenv('HTTPS_PROXY', ''))
+if IS_GHA:
+    logger.info("ℹ️ 检测到处于 GitHub Actions 环境，自动忽略代理以使用 GHA 高信誉原生 IP 绕过 CF")
+    PROXY_SERVER = ''
 
 # ===================== 工具 =====================
 def rand_int(a, b): return random.randint(a, b)
@@ -101,7 +107,7 @@ def send_tg(text, photo_path=None):
 
 # ===================== 核心 =====================
 def create_proxy_extension(proxy_url):
-    """创建包含认证信息的代理插件以绕过 Chrome 不支持命令行代理认证的问题"""
+    """创建包含认证信息的代理插件以绕过 Chrome 不支持命令行代理认证的问题 (Manifest V3 版本)"""
     import zipfile
     # 匹配 scheme://username:password@host:port 或 scheme://host:port
     match = re.match(r'^(https?|socks5)://(?:([^:]+):([^@]+)@)?([^:]+):(\d+)$', proxy_url, re.I)
@@ -114,21 +120,19 @@ def create_proxy_extension(proxy_url):
     manifest_json = """
     {
         "version": "1.0.0",
-        "manifest_version": 2,
+        "manifest_version": 3,
         "name": "Chrome Proxy",
         "permissions": [
             "proxy",
-            "tabs",
-            "unlimitedStorage",
-            "storage",
-            "<all_urls>",
             "webRequest",
-            "webRequestBlocking"
+            "webRequestAuthProvider"
+        ],
+        "host_permissions": [
+            "<all_urls>"
         ],
         "background": {
-            "scripts": ["background.js"]
-        },
-        "minimum_chrome_version":"22.0.0"
+            "service_worker": "background.js"
+        }
     }
     """
 
@@ -148,16 +152,16 @@ def create_proxy_extension(proxy_url):
     chrome.proxy.settings.set({{value: config, scope: "regular"}}, function({{}});
 
     chrome.webRequest.onAuthRequired.addListener(
-        function(details) {{
-            return {{
+        function(details, callback) {{
+            callback({{
                 authCredentials: {{
                     username: "{username}",
                     password: "{password}"
                 }}
-            }};
+            }});
         }},
         {{urls: ["<all_urls>"]}},
-        ['blocking']
+        ['asyncBlocking']
     );
     """
 
@@ -307,7 +311,15 @@ class KataBumpRenew:
 
         # 点击登录
         logger.info(f"📤 提交登录...")
-        self.driver.find_element(By.CSS_SELECTOR, 'button[type="submit"]').click()
+        submit_btn = self.driver.find_element(By.CSS_SELECTOR, 'button[type="submit"]')
+        try:
+            submit_btn.click()
+        except Exception as e:
+            logger.warning(f"⚠️ 正常点击登录按钮被拦截，尝试使用 JS 强制点击提交: {e}")
+            try:
+                self.driver.execute_script("arguments[0].click();", submit_btn)
+            except Exception as js_err:
+                raise Exception(f"提交登录失败: {js_err}")
         human_delay()
 
         # 检测密码错误
@@ -385,7 +397,11 @@ class KataBumpRenew:
             confirm = WebDriverWait(self.driver, 10).until(
                 EC.element_to_be_clickable(
                     (By.XPATH, "//div[@id='renew-modal']//button[@type='submit' and contains(text(), 'Renew')]")))
-            self.driver.execute_script("arguments[0].click();", confirm)
+            try:
+                confirm.click()
+            except Exception as click_err:
+                logger.warning(f"⚠️ 正常点击确认续期按钮失败，使用 JS 强制点击: {click_err}")
+                self.driver.execute_script("arguments[0].click();", confirm)
             logger.info("📤 提交续期请求")
         except Exception as e:
             raise Exception(f"弹窗提交失败: {e}")
