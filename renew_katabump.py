@@ -161,12 +161,15 @@ def create_proxy_extension(proxy_url):
     );
     """
 
-    ext_path = os.path.join(os.getcwd(), 'proxy_auth_ext.zip')
+    ext_dir = os.path.join(os.getcwd(), 'proxy_auth_ext')
     try:
-        with zipfile.ZipFile(ext_path, 'w') as zip_file:
-            zip_file.writestr("manifest.json", manifest_json)
-            zip_file.writestr("background.js", background_js)
-        return ext_path
+        if not os.path.exists(ext_dir):
+            os.makedirs(ext_dir)
+        with open(os.path.join(ext_dir, 'manifest.json'), 'w', encoding='utf-8') as f:
+            f.write(manifest_json)
+        with open(os.path.join(ext_dir, 'background.js'), 'w', encoding='utf-8') as f:
+            f.write(background_js)
+        return ext_dir
     except Exception as e:
         logger.warning(f"创建代理插件失败: {e}")
         return None
@@ -551,10 +554,11 @@ def main():
                 err_shot = err_path
                 break
                 
-    # 清理代理插件压缩包
-    ext_path = os.path.join(os.getcwd(), 'proxy_auth_ext.zip')
-    if os.path.exists(ext_path):
-        try: os.remove(ext_path)
+    # 清理代理插件目录
+    import shutil
+    ext_dir = os.path.join(os.getcwd(), 'proxy_auth_ext')
+    if os.path.exists(ext_dir):
+        try: shutil.rmtree(ext_dir)
         except: pass
 
     send_tg(summary, err_shot)
