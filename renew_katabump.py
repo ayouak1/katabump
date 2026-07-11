@@ -192,9 +192,9 @@ class KataBumpRenew:
         opts.add_argument('--disable-blink-features=AutomationControlled')
         opts.add_argument('--remote-allow-origins=*')
         if PROXY_SERVER:
-            ext_path = create_proxy_extension(PROXY_SERVER)
-            if ext_path:
-                opts.add_argument(f'--load-extension={ext_path}')
+            ext_dir = create_proxy_extension(PROXY_SERVER)
+            if ext_dir:
+                opts.add_argument(f'--load-extension={ext_dir}')
             else:
                 opts.add_argument(f'--proxy-server={PROXY_SERVER}')
 
@@ -225,39 +225,43 @@ class KataBumpRenew:
             raise
 
     def _handle_turnstile(self, context=""):
-        """Cloudflare Turnstile — 偏移物理模拟点击"""
+        """Cloudflare Turnstile — 偏移物理模拟点击 (多坐标扫描模式)"""
         try:
             container = WebDriverWait(self.driver, 15).until(
                 EC.presence_of_element_located((By.CLASS_NAME, "cf-turnstile")))
             size = container.size
-            # 计算偏置位置：宽度 * 0.12 是复选框的左偏移中心，垂直居中
-            base_x = -(size['width'] / 2) + (size['width'] * 0.12)
-            rand_x = base_x + random.uniform(-3, 3)
-            rand_y = random.uniform(-3, 3)
+            
+            # 扫描不同的X轴偏移百分比，规避分辨率/缩放偏差
+            offsets = [0.12, 0.10, 0.15, 0.08, 0.18]
+            for attempt, pct in enumerate(offsets):
+                base_x = -(size['width'] / 2) + (size['width'] * pct)
+                rand_x = base_x + random.uniform(-2, 2)
+                rand_y = random.uniform(-2, 2)
 
-            actions = ActionChains(self.driver)
-            actions.move_to_element(container)
-            actions.pause(random.uniform(0.5, 0.8))
-            actions.move_to_element_with_offset(container, rand_x, rand_y)
-            actions.click_and_hold()
-            actions.pause(random.uniform(0.1, 0.2))
-            actions.release()
-            actions.perform()
-            logger.info(f"🖱&nbsp;{self.masked} [{context}] Turnstile 偏移物理点击完成 (x_offset={rand_x:.1f})")
+                actions = ActionChains(self.driver)
+                actions.move_to_element(container)
+                actions.pause(random.uniform(0.3, 0.5))
+                actions.move_to_element_with_offset(container, rand_x, rand_y)
+                actions.click_and_hold()
+                actions.pause(random.uniform(0.1, 0.2))
+                actions.release()
+                actions.perform()
+                logger.info(f"🖱 [{context}] Turnstile 点击尝试 {attempt+1}/{len(offsets)} (pct={pct}, x_offset={rand_x:.1f})")
 
-            # 轮询验证码 response token 是否生成
-            for _ in range(15):
-                token = self.driver.execute_script(
-                    'return document.querySelector("input[name=\'cf-turnstile-response\']").value;')
-                if token and len(token) > 20:
-                    logger.info(f"✅ {self.masked} [{context}] Turnstile 验证码已通过!")
-                    sleep_ms(1000 + random.random() * 1000)
-                    return True
-                sleep_ms(1000)
-            logger.warning(f"⚠️ {self.masked} [{context}] Turnstile 验证超时")
+                # 每次点击后等待 3 秒检查 token
+                for _ in range(3):
+                    token = self.driver.execute_script(
+                        'return document.querySelector("input[name=\'cf-turnstile-response\']").value;')
+                    if token and len(token) > 20:
+                        logger.info(f"✅ [{context}] Turnstile 验证码已通过!")
+                        sleep_ms(1000)
+                        return True
+                    sleep_ms(1000)
+
+            logger.warning(f"⚠️ [{context}] Turnstile 验证超时")
             return False
         except Exception as e:
-            logger.error(f"❌ {self.masked} [{context}] Turnstile 处理异常: {e}")
+            logger.error(f"❌ [{context}] Turnstile 处理异常: {e}")
             return False
 
     def _handle_altcha(self):
@@ -405,6 +409,20 @@ class KataBumpRenew:
         except Exception as e:
             return False, f"❌ {self.masked} 续签结果核验失败: {e}"
 
+    def save_error_screenshot(self):
+        if not self.driver:
+            return
+        try:
+            self.screenshot_path = f"error-{self.user.split('@')[0]}.png"
+            photo_dir = os.path.join(os.getcwd(), 'screenshots')
+            if not os.path.exists(photo_dir):
+                os.makedirs(photo_dir)
+            full_path = os.path.join(photo_dir, self.screenshot_path)
+            self.driver.save_screenshot(full_path)
+            logger.info(f"📸 失败截图已保存到: {full_path}")
+        except Exception as e:
+            logger.warning(f"无法保存截图: {e}")
+
     def run(self):
         max_retries = 3
         last_error = ""
@@ -426,11 +444,13 @@ class KataBumpRenew:
                     return True, msg
                 
                 last_error = msg
+                self.save_error_screenshot()
                 if "账号或密码错误" in msg or "续期失败:" in msg:
                     break
             except Exception as e:
                 last_error = str(e)[:100]
                 logger.error(f"❌ 运行异常 [第 {attempt+1} 次尝试]: {e}")
+                self.save_error_screenshot()
                 if self.driver:
                     try: self.driver.quit()
                     except: pass
@@ -438,18 +458,6 @@ class KataBumpRenew:
                 if attempt < max_retries - 1:
                     sleep_ms(5000 + random.random() * 5000)
 
-        # 失败时保存本地截图
-        self.screenshot_path = f"error-{self.user.split('@')[0]}.png"
-        photo_dir = os.path.join(os.getcwd(), 'screenshots')
-        if not os.path.exists(photo_dir):
-            os.makedirs(photo_dir)
-        full_screenshot_path = os.path.join(photo_dir, self.screenshot_path)
-        if self.driver:
-            try:
-                self.driver.save_screenshot(full_screenshot_path)
-                logger.info(f"📸 失败截图已保存到: {full_screenshot_path}")
-            except:
-                pass
         return False, f"❌ {self.masked} 最终运行失败: {last_error}"
 
 # ===================== 加载账户列表 =====================
@@ -479,7 +487,7 @@ def load_accounts():
         if accounts:
             return accounts
 
-    # 降级读取本地的 login.json
+    # 降级读取本地 of login.json
     login_path = os.path.join(os.path.dirname(__file__), 'login.json')
     if os.path.exists(login_path):
         try:
