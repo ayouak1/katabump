@@ -88,10 +88,10 @@ class KataBumpRenew:
         logger.info(f"🛡️ 正在尝试过 Turnstile 验证码...")
         try:
             # SeleniumBase 强大的内置 CAPTCHA 物理点击绕过
-            sb.uc_gui_click_captcha()
-            logger.info("✅ Turnstile 物理点击完成")
+            sb.solve_captcha()
+            logger.info("✅ Turnstile 解决完成")
         except Exception as e:
-            logger.warning(f"⚠️ CAPTCHA 点击尝试遇到问题: {e}")
+            logger.warning(f"⚠️ CAPTCHA 解决尝试遇到问题: {e}")
 
         # 轮询验证码 response token 是否生成 (双重确认)
         for _ in range(15):
