@@ -13,23 +13,19 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     
-    - name: Setup Node.js
-      uses: actions/setup-node@v4
+    - name: Set up Python
+      uses: actions/setup-python@v5
       with:
-        node-version: '20'
+        python-version: '3.12'
         
-    - name: Install Dependencies
+    - name: Install System Dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y xvfb dbus-x11 xdotool
-        npm install
-        npx playwright install-deps chrome
-
-    - name: Restore Chrome User Data
-      uses: actions/cache@v4
-      with:
-        path: /tmp/chrome_user_data
-        key: chrome-userdata-${{ runner.os }}-v1
+        sudo apt-get install -y xvfb dbus-x11
+        
+    - name: Install Python Dependencies
+      run: |
+        pip install -r requirements.txt
 
     - name: Run Renew Script
       env:
@@ -37,7 +33,7 @@ jobs:
         HTTP_PROXY: ${{ secrets.HTTP_PROXY }}
         TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
         TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-      run: dbus-run-session -- xvfb-run --auto-servernum --server-args="-screen 0 1280x720x24" node action_renew.js
+      run: dbus-run-session -- xvfb-run --auto-servernum --server-args="-screen 0 1280x720x24" python renew_katabump.py
 
     - name: Upload Screenshots
       if: always()
