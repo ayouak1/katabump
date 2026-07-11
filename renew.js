@@ -216,16 +216,22 @@ async function attemptTurnstileCdp(page) {
         try {
             const url = frame.url();
             if (url.includes('challenges.cloudflare.com') || url.includes('turnstile')) {
-                // 标准 Turnstile 验证码框的复选框固定在左侧约 7% 宽度处，垂直居中
-                const data = { xRatio: 0.07, yRatio: 0.5 };
-                console.log('>> Found Turnstile frame:', url);
-
                 const iframeElement = await frame.frameElement();
                 if (!iframeElement) continue;
 
                 const box = await iframeElement.boundingBox();
                 if (!box) continue;
 
+                console.log(`>> Found Turnstile frame: ${url.substring(0, 80)}... Size: ${box.width}x${box.height}, Pos: (${box.x}, ${box.y})`);
+
+                // 仅点击可见的、宽度符合正常验证框（宽度通常为 300px，高度约 65px）的 iframe
+                if (box.width < 100 || box.height < 20) {
+                    console.log('>> Frame size does not match visible verification box, skipping...');
+                    continue;
+                }
+
+                // 标准 Turnstile 验证码框的复选框固定在左侧约 7% 宽度处，垂直居中
+                const data = { xRatio: 0.07, yRatio: 0.5 };
                 const clickX = box.x + (box.width * data.xRatio);
                 const clickY = box.y + (box.height * data.yRatio);
 
