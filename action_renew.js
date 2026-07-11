@@ -269,26 +269,76 @@ async function attemptTurnstileCdp(page) {
             if (url.includes('challenges.cloudflare.com') || url.includes('turnstile')) {
                 console.log(`>> 发现 Turnstile Frame: ${url.substring(0, 80)}...`);
 
-                const checkbox = frame.locator('input[type="checkbox"]');
-                if (await checkbox.count() > 0) {
-                    console.log('>> 成功定位到复选框，正在物理模拟点击...');
-                    
-                    // 模拟真实人类滑动并点击
-                    await checkbox.scrollIntoViewIfNeeded();
-                    await page.waitForTimeout(200 + Math.random() * 200);
-                    
-                    try {
-                        await checkbox.click({ timeout: 3000 });
-                        console.log('>> 成功发送普通点击！');
-                    } catch (err) {
-                        console.log('>> 普通点击失败，尝试强制点击...');
-                        await checkbox.click({ force: true, timeout: 3000 });
-                        console.log('>> 成功发送强制点击！');
+                // 打印完整的 Shadow DOM 树以便诊断
+                const domTree = await frame.evaluate(() => {
+                    function getDeepHTML(node) {
+                        if (!node) return '';
+                        if (node.nodeType === Node.TEXT_NODE) {
+                            return node.textContent.trim();
+                        }
+                        let html = '';
+                        if (node.tagName) {
+                            html += `<${node.tagName.toLowerCase()}`;
+                            if (node.attributes) {
+                                for (let attr of node.attributes) {
+                                    html += ` ${attr.name}="${attr.value}"`;
+                                }
+                            }
+                            html += '>';
+                        }
+
+                        if (node.shadowRoot) {
+                            html += `[ShadowRoot: ${getDeepHTML(node.shadowRoot)}]`;
+                        }
+
+                        if (node.childNodes) {
+                            for (let child of node.childNodes) {
+                                html += getDeepHTML(child);
+                            }
+                        }
+
+                        if (node.tagName) {
+                            html += `</${node.tagName.toLowerCase()}>`;
+                        }
+                        return html;
                     }
-                    return true;
-                } else {
-                    console.log('>> 未能在该 Frame 中找到 input[type="checkbox"]。');
+                    return getDeepHTML(document.body);
+                }).catch(e => `Error: ${e.message}`);
+                
+                console.log('>> [DOM 诊断] HTML 结构如下:\n' + domTree);
+
+                // 尝试多个常见的 Cloudflare Turnstile 交互元素选择器
+                const selectors = [
+                    'input[type="checkbox"]',
+                    'span.mark',
+                    'div.ctp-checkbox-container',
+                    'div.ctp-checkbox-label',
+                    '#challenge-stage input',
+                    '#challenge-stage div'
+                ];
+
+                for (const selector of selectors) {
+                    const checkbox = frame.locator(selector);
+                    if (await checkbox.count() > 0) {
+                        console.log(`>> 成功匹配选择器: "${selector}"，正在尝试点击...`);
+                        await checkbox.first().scrollIntoViewIfNeeded();
+                        await page.waitForTimeout(200);
+                        try {
+                            await checkbox.first().click({ timeout: 2000 });
+                            console.log(`>> 选择器 "${selector}" 点击发送成功！`);
+                            return true;
+                        } catch (err) {
+                            try {
+                                await checkbox.first().click({ force: true, timeout: 2000 });
+                                console.log(`>> 选择器 "${selector}" 强制点击发送成功！`);
+                                return true;
+                            } catch (e2) {
+                                console.log(`>> 选择器 "${selector}" 点击失败: ${e2.message}`);
+                            }
+                        }
+                    }
                 }
+                console.log('>> 所有预设选择器均未能匹配成功。');
             }
         } catch (e) { }
     }
