@@ -499,20 +499,88 @@ async function attemptTurnstileCdp(page) {
                 throw e; // 抛出错误给外层 catch，标记为登录失败跳过
             }
 
-            console.log('正在寻找 "See" 链接...');
+            // --- 导航到服务器详情页 ---
+            // Katabump 在 2026年7月初改版了 dashboard，"See" 链接可能已经被移除或改名
+            console.log('正在导航到服务器详情页...');
+            let navigatedToDetails = false;
+
+            // 策略 1: 尝试原始的 "See" 链接
             try {
-                await page.getByRole('link', { name: 'See' }).first().waitFor({ timeout: 15000 });
-                await page.waitForTimeout(1000);
-                await page.getByRole('link', { name: 'See' }).first().click();
-            } catch (e) {
-                console.log('[异常] 未找到 "See" 按钮，可能无服务器或者控制台异常。');
-                
-                // 截图报错并爆红
-                const errShotPath = path.join(photoDir, `${safeUsername}_error.png`);
-                try { await page.screenshot({ path: errShotPath, fullPage: true }); } catch (err) { }
-                await sendTelegramMessage(`🚨 *服务器运行异常报警*\n用户: ${user.username}\n原因: 未在面板首页找到您的服务器 (找不到 "See" 按钮)。请立刻检查服务器是否已被删除！`, errShotPath);
-                process.exit(1);
+                const seeLink = page.getByRole('link', { name: 'See' }).first();
+                if (await seeLink.isVisible({ timeout: 3000 })) {
+                    await seeLink.click();
+                    navigatedToDetails = true;
+                    console.log('   >> 通过 "See" 链接成功导航。');
+                }
+            } catch (e) { }
+
+            // 策略 2: 尝试 "Manage" / "Details" / "View" 等替代链接
+            if (!navigatedToDetails) {
+                const altNames = ['Manage', 'Details', 'View', 'Open', 'Dashboard'];
+                for (const name of altNames) {
+                    try {
+                        const link = page.getByRole('link', { name, exact: false }).first();
+                        if (await link.isVisible({ timeout: 1500 })) {
+                            await link.click();
+                            navigatedToDetails = true;
+                            console.log(`   >> 通过 "${name}" 链接成功导航。`);
+                            break;
+                        }
+                    } catch (e) { }
+                }
             }
+
+            // 策略 3: 尝试点击服务器卡片 (可能是 <a> 或可点击的 <div>)
+            if (!navigatedToDetails) {
+                try {
+                    const serverCard = page.locator('.server-card, .card, [class*="server"], a[href*="/server/"]').first();
+                    if (await serverCard.isVisible({ timeout: 2000 })) {
+                        await serverCard.click();
+                        navigatedToDetails = true;
+                        console.log('   >> 通过服务器卡片元素成功导航。');
+                    }
+                } catch (e) { }
+            }
+
+            // 策略 4: 直接通过 URL 导航到服务器列表/详情
+            if (!navigatedToDetails) {
+                try {
+                    // 尝试从当前页面提取服务器链接
+                    const serverLink = await page.evaluate(() => {
+                        const links = document.querySelectorAll('a[href*="/server"]');
+                        for (const a of links) {
+                            if (a.href && !a.href.includes('login') && !a.href.includes('auth')) {
+                                return a.href;
+                            }
+                        }
+                        return null;
+                    });
+                    if (serverLink) {
+                        await page.goto(serverLink);
+                        navigatedToDetails = true;
+                        console.log(`   >> 通过 URL 直接导航: ${serverLink}`);
+                    }
+                } catch (e) { }
+            }
+
+            // 如果所有导航方式都失败，截图记录当前页面状态但不立即退出
+            // 因为 Renew 按钮可能直接在 dashboard 首页
+            if (!navigatedToDetails) {
+                console.log('   >> ⚠️ 未找到详情页导航链接，将在当前页面直接寻找 Renew 按钮...');
+                const debugShotPath = path.join(photoDir, `${safeUsername}_dashboard_debug.png`);
+                try { await page.screenshot({ path: debugShotPath, fullPage: true }); } catch (err) { }
+                // 打印当前页面上所有可见链接和按钮，便于排查
+                try {
+                    const pageInfo = await page.evaluate(() => {
+                        const links = [...document.querySelectorAll('a')].map(a => ({ text: a.innerText.trim().substring(0, 50), href: a.href })).filter(l => l.text);
+                        const buttons = [...document.querySelectorAll('button')].map(b => b.innerText.trim().substring(0, 50)).filter(t => t);
+                        return { url: window.location.href, links: links.slice(0, 20), buttons: buttons.slice(0, 10) };
+                    });
+                    console.log('[调试] 当前页面状态:', JSON.stringify(pageInfo, null, 2));
+                } catch (e) { }
+            }
+
+            await page.waitForTimeout(3000);
 
             // --- Renew 逻辑 ---
             const originalExpiry = await getExpiryDate(page);
