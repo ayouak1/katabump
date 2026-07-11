@@ -24,16 +24,19 @@ jobs:
         sudo apt-get install -y xvfb dbus-x11
         npm install
         npx playwright install-deps chrome
-      
+
+    - name: Restore Chrome User Data
+      uses: actions/cache@v4
+      with:
+        path: /tmp/chrome_user_data
+        key: chrome-userdata-${{ runner.os }}-v1
+
     - name: Run Renew Script
       env:
-        # 将 USERS_JSON 配置在 GitHub Repository Secrets 中
-        # 格式: [{"username": "xxx", "password": "xxx"}, ...]
         USERS_JSON: ${{ secrets.USERS_JSON }}
         HTTP_PROXY: ${{ secrets.HTTP_PROXY }}
         TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
         TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-      # 重新使用 xvfb-run 并在外部封装 dbus 会话，解决定时任务启动崩溃
       run: dbus-run-session -- xvfb-run --auto-servernum --server-args="-screen 0 1280x720x24" node action_renew.js
 
     - name: Upload Screenshots
