@@ -68,7 +68,7 @@ class KataBumpRenew:
     def process(self, sb):
         """主续期流程"""
         logger.info(f"🚀 访问登录页: {self.masked}")
-        sb.open("https://dashboard.katabump.com/auth/login")
+        sb.activate_cdp_mode("https://dashboard.katabump.com/auth/login")
         sb.sleep(5)
 
         # 输入邮箱
