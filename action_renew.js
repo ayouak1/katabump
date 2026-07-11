@@ -108,7 +108,7 @@ const INJECTED_SCRIPT = `
                     }
                     return false;
                 };
-
+ 
                 if (!checkAndReport()) {
                     const observer = new MutationObserver(() => {
                         if (checkAndReport()) observer.disconnect();
@@ -231,6 +231,22 @@ async function launchChrome() {
     }
 }
 
+async function getExpiryDate(page) {
+    try {
+        const expiryLoc = page.getByText('Expiry:', { exact: false }).first();
+        if (await expiryLoc.isVisible({ timeout: 5000 })) {
+            const text = await expiryLoc.innerText();
+            const match = text.match(/Expiry:\s*([0-9]{4}-[0-9]{2}-[0-9]{2})/i);
+            if (match) {
+                return match[1].trim();
+            }
+        }
+    } catch (e) {
+        console.log('[获取到期日] 获取到期时间异常:', e.message);
+    }
+    return null;
+}
+
 function getUsers() {
     // 从环境变量读取 JSON 字符串
     // GitHub Actions Secret: USERS_JSON = [{"username":..., "password":...}]
@@ -350,6 +366,12 @@ async function attemptTurnstileCdp(page) {
         const user = users[i];
         console.log(`\n=== 正在处理用户 ${i + 1}/${users.length} ===`); // 隐去具体邮箱 logging
 
+        const fs = require('fs');
+        const path = require('path');
+        const photoDir = path.join(process.cwd(), 'screenshots');
+        if (!fs.existsSync(photoDir)) fs.mkdirSync(photoDir, { recursive: true });
+        const safeUsername = user.username.replace(/[^a-z0-9]/gi, '_');
+
         try {
             if (page.isClosed()) {
                 page = await context.newPage();
@@ -442,11 +464,19 @@ async function attemptTurnstileCdp(page) {
                 await page.waitForTimeout(1000);
                 await page.getByRole('link', { name: 'See' }).first().click();
             } catch (e) {
-                console.log('未找到 "See" 按钮。');
-                continue;
+                console.log('[异常] 未找到 "See" 按钮，可能无服务器或者控制台异常。');
+                
+                // 截图报错并爆红
+                const errShotPath = path.join(photoDir, `${safeUsername}_error.png`);
+                try { await page.screenshot({ path: errShotPath, fullPage: true }); } catch (err) { }
+                await sendTelegramMessage(`🚨 *服务器运行异常报警*\n用户: ${user.username}\n原因: 未在面板首页找到您的服务器 (找不到 "See" 按钮)。请立刻检查服务器是否已被删除！`, errShotPath);
+                process.exit(1);
             }
 
             // --- Renew 逻辑 ---
+            const originalExpiry = await getExpiryDate(page);
+            console.log(`[到期日] 续签前的到期时间: ${originalExpiry || '未获取到'}`);
+
             let renewSuccess = false;
             // 2. 一个扁平化的主循环：尝试 Renew 整个流程 (最多 20 次)
             for (let attempt = 1; attempt <= 20; attempt++) {
@@ -506,6 +536,7 @@ async function attemptTurnstileCdp(page) {
 
                     // C. 检查 Success 标志
                     const frames = page.frames();
+                    let isTurnstileSuccess = false;
                     for (const f of frames) {
                         if (f.url().includes('cloudflare')) {
                             try {
@@ -523,12 +554,7 @@ async function attemptTurnstileCdp(page) {
                     if (await confirmBtn.isVisible()) {
 
                         // User Requested: Screenshot BEFORE final click
-                        const fs = require('fs');
-                        const path = require('path');
-                        const photoDir = path.join(process.cwd(), 'screenshots');
-                        if (!fs.existsSync(photoDir)) fs.mkdirSync(photoDir, { recursive: true });
-                        const safeUser = user.username.replace(/[^a-z0-9]/gi, '_');
-                        const tsScreenshotName = `${safeUser}_Turnstile_${attempt}.png`;
+                        const tsScreenshotName = `${safeUsername}_Turnstile_${attempt}.png`;
                         try {
                             await page.screenshot({ path: path.join(photoDir, tsScreenshotName), fullPage: true });
                             console.log(`   >> 📸 快照已保存: ${tsScreenshotName}`);
@@ -573,12 +599,7 @@ async function attemptTurnstileCdp(page) {
                                     console.log(`   >> ⏳ 暂无法续期。下次可用时间: ${displayDate}`);
 
                                     // 截图证明
-                                    const fs = require('fs');
-                                    const path = require('path');
-                                    const photoDir = path.join(process.cwd(), 'screenshots');
-                                    if (!fs.existsSync(photoDir)) fs.mkdirSync(photoDir, { recursive: true });
-                                    const safeUser = user.username.replace(/[^a-z0-9]/gi, '_');
-                                    const skipShotPath = path.join(photoDir, `${safeUser}_skip.png`);
+                                    const skipShotPath = path.join(photoDir, `${safeUsername}_skip.png`);
                                     try { await page.screenshot({ path: skipShotPath, fullPage: true }); } catch (e) { }
 
                                     await sendTelegramMessage(`⏳ *暂无法续期 (跳过)*\n用户: ${user.username}\n原因: 还没到时间\n下次可用: ${displayDate}`, skipShotPath);
@@ -603,23 +624,41 @@ async function attemptTurnstileCdp(page) {
                             continue; // 刷新后，重新开始大循环
                         }
 
-                        // F. 检查成功 (模态框消失)
+                        // F. 检查成功 (模态框消失，刷新页面做最终 Expiry 校验)
                         await page.waitForTimeout(2000);
                         if (!await modal.isVisible()) {
-                            console.log('   >> ✅ Modal closed. Renew successful!');
+                            console.log('   >> 模态框已关闭。正在强制刷新页面以验证到期时间是否发生变更...');
+                            await page.reload();
+                            await page.waitForTimeout(4000);
 
-                            // 截图成功状态
-                            const fs = require('fs');
-                            const path = require('path');
-                            const photoDir = path.join(process.cwd(), 'screenshots');
-                            if (!fs.existsSync(photoDir)) fs.mkdirSync(photoDir, { recursive: true });
-                            const safeUser = user.username.replace(/[^a-z0-9]/gi, '_');
-                            const successShotPath = path.join(photoDir, `${safeUser}_success.png`);
-                            try { await page.screenshot({ path: successShotPath, fullPage: true }); } catch (e) { }
+                            const newExpiry = await getExpiryDate(page);
+                            console.log(`   >> 原始到期时间: ${originalExpiry || '未获取到'}, 当前最新到期时间: ${newExpiry || '未获取到'}`);
 
-                            await sendTelegramMessage(`✅ *续期成功*\n用户: ${user.username}\n状态: 服务器已成功续期！`, successShotPath);
-                            renewSuccess = true;
-                            break;
+                            if (originalExpiry && newExpiry && newExpiry !== originalExpiry) {
+                                console.log('   >> ✅ 到期时间发生变更！续约确认成功！');
+
+                                // 截图成功状态
+                                const successShotPath = path.join(photoDir, `${safeUsername}_success.png`);
+                                try { await page.screenshot({ path: successShotPath, fullPage: true }); } catch (e) { }
+
+                                await sendTelegramMessage(`✅ *续期成功*\n用户: ${user.username}\n状态: 服务器已成功续期！\n新到期日: ${newExpiry}`, successShotPath);
+                                renewSuccess = true;
+                                break;
+                            } else if (!originalExpiry && newExpiry) {
+                                // 兜底：如果之前没获取到，但现在拿到了，也认为成了
+                                console.log('   >> ✅ 成功捕获最新到期时间！续约确认成功！');
+                                const successShotPath = path.join(photoDir, `${safeUsername}_success.png`);
+                                try { await page.screenshot({ path: successShotPath, fullPage: true }); } catch (e) { }
+
+                                await sendTelegramMessage(`✅ *续期成功*\n用户: ${user.username}\n状态: 服务器已成功续期！\n新到期日: ${newExpiry}`, successShotPath);
+                                renewSuccess = true;
+                                break;
+                            } else {
+                                console.log('   >> ❌ 到期时间无变化或未获取到，判定实际上并未续期成功！正在刷新重试...');
+                                await page.reload();
+                                await page.waitForTimeout(3000);
+                                continue;
+                            }
                         } else {
                             console.log('   >> 模态框仍打开但无错误？重试循环...');
                             await page.reload();
@@ -634,8 +673,16 @@ async function attemptTurnstileCdp(page) {
                     }
 
                 } else {
-                    console.log('未找到 Renew 按钮 (服务器可能已续期或页面加载错误)。');
-                    break;
+                    console.log('[异常] 未在页面找到 Renew 按钮，且没有触发“暂无法续期”的跳过警告！');
+                    console.log('[异常] 这可能是因为服务器已被暂停、删除，或面板发生了结构性变化。');
+
+                    // 截图报错
+                    const errShotPath = path.join(photoDir, `${safeUsername}_error.png`);
+                    try { await page.screenshot({ path: errShotPath, fullPage: true }); } catch (e) { }
+
+                    await sendTelegramMessage(`🚨 *服务器运行异常报警*\n用户: ${user.username}\n原因: 找不到 Renew 按钮，可能服务器已被暂停、被删除，或面板发生了结构性变动。请立即登录控制台核对！`, errShotPath);
+
+                    process.exit(1); // 强制爆红 Actions，引发警报
                 }
             }
         } catch (err) {
@@ -644,12 +691,6 @@ async function attemptTurnstileCdp(page) {
 
         // Snapshot before handling next user
         // In GitHub Actions, we save to 'screenshots' dir
-        const fs = require('fs');
-        const path = require('path');
-        const photoDir = path.join(process.cwd(), 'screenshots');
-        if (!fs.existsSync(photoDir)) fs.mkdirSync(photoDir, { recursive: true });
-        // Use safe filename
-        const safeUsername = user.username.replace(/[^a-z0-9]/gi, '_');
         const screenshotPath = path.join(photoDir, `${safeUsername}.png`);
         try {
             await page.screenshot({ path: screenshotPath, fullPage: true });
