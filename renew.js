@@ -2,7 +2,7 @@ const { chromium } = require('playwright-extra');
 const stealth = require('puppeteer-extra-plugin-stealth')();
 const fs = require('fs');
 const path = require('path');
-const { spawn } = require('child_process');
+const { spawn, exec } = require('child_process');
 const axios = require('axios');
 const http = require('http');
 
@@ -99,35 +99,47 @@ const INJECTED_SCRIPT = `
 })();
 `;
 
-// 辅助函数：检测代理是否可用
+// 辅助函数：检测代理是否可用 (支持 HTTP 与 Socks5)
 async function checkProxy() {
     if (!PROXY_CONFIG) return true;
 
     console.log('[Proxy] Validating proxy connection...');
-    try {
-        const axiosConfig = {
-            proxy: {
-                protocol: 'http',
-                host: new URL(PROXY_CONFIG.server).hostname,
-                port: new URL(PROXY_CONFIG.server).port,
-            },
-            timeout: 10000
-        };
+    const maxRetries = 3;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            const isSocks = PROXY_CONFIG.server.startsWith('socks');
+            const proxyFlag = isSocks ? '--socks5' : '--proxy';
+            
+            let authStr = '';
+            if (PROXY_CONFIG.username && PROXY_CONFIG.password) {
+                authStr = ` -U "${PROXY_CONFIG.username}:${PROXY_CONFIG.password}"`;
+            }
+            
+            const devNull = process.platform === 'win32' ? 'NUL' : '/dev/null';
+            const cmd = `curl -s -o ${devNull} -I -w "%{http_code}" ${proxyFlag} "${PROXY_CONFIG.server}"${authStr} https://www.google.com`;
 
-        if (PROXY_CONFIG.username && PROXY_CONFIG.password) {
-            axiosConfig.proxy.auth = {
-                username: PROXY_CONFIG.username,
-                password: PROXY_CONFIG.password
-            };
+            const httpCode = await new Promise((resolve, reject) => {
+                exec(cmd, (err, stdout) => {
+                    if (err) reject(err);
+                    else resolve(stdout.trim());
+                });
+            });
+
+            if (httpCode && httpCode !== '000') {
+                console.log(`[Proxy] Connection successful! HTTP Code: ${httpCode}`);
+                return true;
+            } else {
+                throw new Error(`Invalid HTTP Code: ${httpCode}`);
+            }
+        } catch (error) {
+            console.warn(`[Proxy] Connection attempt ${attempt}/${maxRetries} failed: ${error.message}`);
+            if (attempt < maxRetries) {
+                await new Promise(r => setTimeout(r, 3000));
+            } else {
+                console.error(`[Proxy] Connection failed after ${maxRetries} attempts.`);
+                return false;
+            }
         }
-
-        // 尝试访问一个可靠的测试地址 (Cloudflare Trace 或者 Google)
-        await axios.get('https://www.google.com', axiosConfig);
-        console.log('[Proxy] Connection successful!');
-        return true;
-    } catch (error) {
-        console.error(`[Proxy] Connection failed: ${error.message}`);
-        return false;
     }
 }
 
@@ -211,31 +223,54 @@ function getUsers() {
  * 计算绝对屏幕坐标，并使用 CDP 发送原生鼠标点击事件。
  */
 async function attemptTurnstileCdp(page) {
+    // 1. 优先尝试直接点击主页面的 .cf-turnstile 容器
+    try {
+        const container = page.locator('.cf-turnstile').first();
+        if (await container.isVisible({ timeout: 2000 })) {
+            const box = await container.boundingBox();
+            if (box && box.width > 0 && box.height > 0) {
+                // 计算 checkbox 偏移量 (通常占宽度的 12% 左右，垂直居中)
+                const clickX = box.width * 0.12 + (Math.random() * 4 - 2);
+                const clickY = box.height / 2 + (Math.random() * 4 - 2);
+                await container.click({ position: { x: clickX, y: clickY }, timeout: 2000 });
+                console.log(`>> [偏移点击] 成功点击 .cf-turnstile 容器偏置坐标: x=${clickX.toFixed(1)}, y=${clickY.toFixed(1)}`);
+                return true;
+            }
+        }
+    } catch (e) {
+        console.log(`>> [偏移点击] 尝试点击容器失败: ${e.message}`);
+    }
+
+    // 2. 备用方案：遍历 Iframe 并检查内部 checkbox
     const frames = page.frames();
     for (const frame of frames) {
         try {
             const url = frame.url();
             if (url.includes('challenges.cloudflare.com') || url.includes('turnstile')) {
-                console.log(`>> Found Turnstile frame: ${url.substring(0, 80)}...`);
-
-                const checkbox = frame.locator('input[type="checkbox"]');
-                if (await checkbox.count() > 0) {
-                    console.log('>> Found Turnstile checkbox, simulating click...');
-                    
-                    await checkbox.scrollIntoViewIfNeeded();
-                    await page.waitForTimeout(200 + Math.random() * 200);
-                    
-                    try {
-                        await checkbox.click({ timeout: 3000 });
-                        console.log('>> Click sent successfully!');
-                    } catch (err) {
-                        console.log('>> Click failed, trying forced click...');
-                        await checkbox.click({ force: true, timeout: 3000 });
-                        console.log('>> Forced click sent successfully!');
+                const selectors = [
+                    'input[type="checkbox"]',
+                    'span.mark',
+                    'div.ctp-checkbox-container',
+                    'div.ctp-checkbox-label',
+                    '#challenge-stage input',
+                    '#challenge-stage div'
+                ];
+                for (const selector of selectors) {
+                    const checkbox = frame.locator(selector);
+                    if (await checkbox.count() > 0) {
+                        console.log(`>> [Iframe 匹配] 成功匹配选择器: "${selector}"，正在尝试点击...`);
+                        await checkbox.first().scrollIntoViewIfNeeded();
+                        await page.waitForTimeout(200);
+                        try {
+                            await checkbox.first().click({ timeout: 2000 });
+                            return true;
+                        } catch (err) {
+                            try {
+                                await checkbox.first().click({ force: true, timeout: 2000 });
+                                return true;
+                            } catch (e2) { }
+                        }
                     }
-                    return true;
-                } else {
-                    console.log('>> input[type="checkbox"] not found in Turnstile frame.');
                 }
             }
         } catch (e) { }
@@ -259,12 +294,13 @@ async function attemptTurnstileCdp(page) {
         }
     }
 
-    console.log('Launching Chrome with persistent context...');
+    console.log('Launching Chrome with standard context...');
     const launchArgs = [
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-gpu',
-        '--window-size=1280,720'
+        '--window-size=1280,720',
+        '--disable-blink-features=AutomationControlled'
     ];
 
     const launchOptions = {
@@ -283,10 +319,11 @@ async function attemptTurnstileCdp(page) {
         }
     }
 
-    const context = await chromium.launchPersistentContext(USER_DATA_DIR, launchOptions);
+    const browser = await chromium.launch(launchOptions);
     console.log('Chrome launched successfully!');
     
-    let page = context.pages().length > 0 ? context.pages()[0] : await context.newPage();
+    const context = await browser.newContext();
+    let page = await context.newPage();
     page.setDefaultTimeout(60000);
 
     // --- 关键：注入 Hook 脚本 ---
@@ -331,64 +368,78 @@ async function attemptTurnstileCdp(page) {
                 await pwdInput.fill(user.password);
                 await page.waitForTimeout(500);
 
-                // --- Cloudflare Turnstile Bypass for Login ---
-                console.log('   >> Checking for Turnstile before login (using CDP bypass)...');
-                let cdpClickResult = false;
-                for (let findAttempt = 0; findAttempt < 15; findAttempt++) {
-                    cdpClickResult = await attemptTurnstileCdp(page);
-                    if (cdpClickResult) break;
-                    // console.log(`   >> [Login Find Attempt ${findAttempt + 1}/15] Turnstile checkbox not found yet...`);
-                    await page.waitForTimeout(1000);
-                }
-
-                if (cdpClickResult) {
-                    console.log('   >> CDP Click active for login. Waiting up to 10s for Cloudflare success...');
-                    // Wait for the "Success!" mark in any cloudflare frame
-                    for (let waitSec = 0; waitSec < 10; waitSec++) {
-                        const frames = page.frames();
-                        let isSuccess = false;
-                        for (const f of frames) {
-                            if (f.url().includes('cloudflare')) {
-                                try {
-                                    if (await f.getByText('Success!', { exact: false }).isVisible({ timeout: 500 })) {
-                                        isSuccess = true;
-                                        break;
-                                    }
-                                } catch (e) { }
+                let loginSuccess = false;
+                for (let loginAttempt = 1; loginAttempt <= 5; loginAttempt++) {
+                    console.log(`   >> [Login Attempt ${loginAttempt}/5] Checking and attempting to bypass Turnstile...`);
+                    
+                    console.log('   >> Waiting for Turnstile verification (checking response token)...');
+                    let verified = false;
+                    for (let waitSec = 0; waitSec < 15; waitSec++) {
+                        try {
+                            const token = await page.locator('input[name="cf-turnstile-response"]').inputValue({ timeout: 500 });
+                            if (token && token.length > 20) {
+                                console.log('   >> ✅ Turnstile verification successful (token generated).');
+                                verified = true;
+                                break;
                             }
-                        }
-                        if (isSuccess) {
-                            console.log('   >> Turnstile verification successful before login.');
-                            break;
+                        } catch (e) { }
+
+                        // Check and click Turnstile container every 3 seconds
+                        if (waitSec % 3 === 0) {
+                            await attemptTurnstileCdp(page);
                         }
                         await page.waitForTimeout(1000);
                     }
-                } else {
-                    console.log('   >> No Turnstile detected or clicked before login, proceeding anyway...');
-                }
-                // --------------------------------------------
 
-                await page.getByRole('button', { name: 'Login', exact: true }).click();
-
-                // User Request: Check for "Incorrect password or no account"
-                try {
-                    const errorMsg = page.getByText('Incorrect password or no account');
-                    if (await errorMsg.isVisible({ timeout: 3000 })) {
-                        console.error(`   >> ❌ Login failed: Incorrect password or no account for user ${user.username}`);
-
-                        // Screenshot for login failure
-                        const photoDir = path.join(__dirname, 'photo');
-                        if (!fs.existsSync(photoDir)) fs.mkdirSync(photoDir, { recursive: true });
-                        try { await page.screenshot({ path: path.join(photoDir, `${user.username}.png`), fullPage: true }); } catch (e) { }
-
-                        // Skip to next user
-                        continue;
+                    if (!verified) {
+                        console.log('   >> No Turnstile token detected, attempting to submit login...');
                     }
-                } catch (e) { }
+
+                    await page.getByRole('button', { name: 'Login', exact: true }).click();
+                    await page.waitForTimeout(3000); // Wait for response
+
+                    // 1. Check if login was successful and redirected
+                    if (page.url().includes('dashboard') && !page.url().includes('login')) {
+                        console.log('   >> ✅ Login successful! Redirected to dashboard.');
+                        loginSuccess = true;
+                        break;
+                    }
+
+                    // 2. Check for Incorrect password
+                    try {
+                        const errorMsg = page.getByText('Incorrect password or no account');
+                        if (await errorMsg.isVisible({ timeout: 1000 })) {
+                            console.error(`   >> ❌ Login failed: Incorrect password or no account for user ${user.username}`);
+                            const photoDir = path.join(__dirname, 'photo');
+                            if (!fs.existsSync(photoDir)) fs.mkdirSync(photoDir, { recursive: true });
+                            try { await page.screenshot({ path: path.join(photoDir, `${user.username}.png`), fullPage: true }); } catch (e) { }
+                            throw new Error('PASSWORD_INCORRECT');
+                        }
+                    } catch (e) {
+                        if (e.message === 'PASSWORD_INCORRECT') throw e;
+                    }
+
+                    // 3. Check for Captcha error
+                    try {
+                        const captchaMsg = page.getByText('Please complete captcha');
+                        if (await captchaMsg.isVisible({ timeout: 1000 })) {
+                            console.log('   >> ⚠️ Login failed: Please complete captcha. Retrying...');
+                            continue;
+                        }
+                    } catch (e) { }
+
+                    console.log('   >> Login did not redirect, checking Turnstile again...');
+                }
+
+                if (!loginSuccess && !page.url().includes('dashboard')) {
+                    throw new Error('LOGIN_FAILED');
+                }
 
             } catch (e) {
-                // 可能已经登录了，或者是其他 UI 状态
-                console.log('Login form interaction error (maybe already logged in?):', e.message);
+                if (e.message === 'PASSWORD_INCORRECT') {
+                    continue; // Skip to next user
+                }
+                throw e; // Pass to outer catch
             }
 
             console.log('Waiting for "See" link...');
@@ -583,7 +634,11 @@ async function attemptTurnstileCdp(page) {
             }
 
         } catch (err) {
-            console.error(`Error processing user ${user.username}:`, err);
+            if (err.message === 'LOGIN_FAILED') {
+                console.error(`❌ User ${user.username} login failed (captcha/timeout). Skipping user.`);
+            } else {
+                console.error(`Error processing user ${user.username}:`, err);
+            }
         }
 
         // Snapshot before handling next user (Normal end of loop)
@@ -601,7 +656,7 @@ async function attemptTurnstileCdp(page) {
     }
 
     console.log('All users processed.');
-    console.log('Closing browser context.');
-    await context.close();
+    console.log('Closing browser.');
+    await browser.close();
     process.exit(0);
 })();

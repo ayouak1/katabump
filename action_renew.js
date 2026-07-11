@@ -40,21 +40,21 @@ async function sendTelegramMessage(message, imagePath = null) {
         });
     }
 }
-
 // 启用 stealth 插件
 chromium.use(stealth);
 
-// GitHub Actions 环境下的 Chrome 路径 (通常是 google-chrome)
-const CHROME_PATH = process.env.CHROME_PATH || '/usr/bin/google-chrome';
+// GitHub Actions 环境下的 Chrome 路径 (自动兼容 Windows 本地调试)
+const CHROME_PATH = process.env.CHROME_PATH || 
+    (process.platform === 'win32' ? 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe' : '/usr/bin/google-chrome');
 const DEBUG_PORT = 9222;
-
+ 
 // 确保 localhost 不走代理
 process.env.NO_PROXY = 'localhost,127.0.0.1';
-
+ 
 // --- Proxy Configuration ---
 const HTTP_PROXY = process.env.HTTP_PROXY;
 let PROXY_CONFIG = null;
-
+ 
 if (HTTP_PROXY) {
     try {
         const proxyUrl = new URL(HTTP_PROXY);
@@ -69,7 +69,7 @@ if (HTTP_PROXY) {
         process.exit(1);
     }
 }
-
+ 
 // --- INJECTED_SCRIPT ---
 const INJECTED_SCRIPT = `
 (function() {
@@ -123,8 +123,8 @@ const INJECTED_SCRIPT = `
     }
 })();
 `;
-
-// 辅助函数：检测代理是否可用
+ 
+// 辅助函数：检测代理是否可用 (支持 HTTP 与 Socks5)
 async function checkProxy() {
     if (!PROXY_CONFIG) return true;
 
@@ -132,25 +132,30 @@ async function checkProxy() {
     const maxRetries = 3;
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
-            const axiosConfig = {
-                proxy: {
-                    protocol: 'http',
-                    host: new URL(PROXY_CONFIG.server).hostname,
-                    port: new URL(PROXY_CONFIG.server).port,
-                },
-                timeout: 10000
-            };
-
+            const isSocks = PROXY_CONFIG.server.startsWith('socks');
+            const proxyFlag = isSocks ? '--socks5' : '--proxy';
+            
+            let authStr = '';
             if (PROXY_CONFIG.username && PROXY_CONFIG.password) {
-                axiosConfig.proxy.auth = {
-                    username: PROXY_CONFIG.username,
-                    password: PROXY_CONFIG.password
-                };
+                authStr = ` -U "${PROXY_CONFIG.username}:${PROXY_CONFIG.password}"`;
             }
+            
+            const devNull = process.platform === 'win32' ? 'NUL' : '/dev/null';
+            const cmd = `curl -s -o ${devNull} -I -w "%{http_code}" ${proxyFlag} "${PROXY_CONFIG.server}"${authStr} https://www.google.com`;
 
-            await axios.get('https://www.google.com', axiosConfig);
-            console.log('[代理] 连接成功！');
-            return true;
+            const httpCode = await new Promise((resolve, reject) => {
+                exec(cmd, (err, stdout) => {
+                    if (err) reject(err);
+                    else resolve(stdout.trim());
+                });
+            });
+
+            if (httpCode && httpCode !== '000') {
+                console.log(`[代理] 连接成功！HTTP Code: ${httpCode}`);
+                return true;
+            } else {
+                throw new Error(`Invalid HTTP Code: ${httpCode}`);
+            }
         } catch (error) {
             console.warn(`[代理] 连接尝试 ${attempt}/${maxRetries} 失败: ${error.message}`);
             if (attempt < maxRetries) {
@@ -162,7 +167,7 @@ async function checkProxy() {
         }
     }
 }
-
+ 
 function checkPort(port) {
     return new Promise((resolve) => {
         const req = http.get(`http://127.0.0.1:${port}/json/version`, (res) => {
@@ -172,19 +177,19 @@ function checkPort(port) {
         req.end();
     });
 }
-
+ 
 async function launchChrome() {
     console.log('检查 Chrome 是否已在端口 ' + DEBUG_PORT + ' 上运行...');
     if (await checkPort(DEBUG_PORT)) {
         console.log('Chrome 已开启。');
         return;
     }
-
+ 
     // 清除可能导致 Chrome 崩溃的无效 DBUS 地址
     delete process.env.DBUS_SESSION_BUS_ADDRESS;
-
+ 
     console.log(`正在启动 Chrome (路径: ${CHROME_PATH})...`);
-
+ 
     const args = [
         `--remote-debugging-port=${DEBUG_PORT}`,
         '--no-first-run',
@@ -196,15 +201,15 @@ async function launchChrome() {
         '--disable-setuid-sandbox',
         '--user-data-dir=/tmp/chrome_user_data' // 必须指定用户数据目录，否则远程调试可能失败
     ];
-
+ 
     if (PROXY_CONFIG) {
         args.push(`--proxy-server=${PROXY_CONFIG.server}`);
         args.push('--proxy-bypass-list=<-loopback>');
     }
     // 添加针对 Linux 环境的额外稳定性参数
     args.push('--disable-dev-shm-usage'); // 避免共享内存不足
-
-
+ 
+ 
     const fs = require('fs');
     const logStream = fs.createWriteStream('/tmp/chrome_startup.log');
     const chrome = spawn(CHROME_PATH, args, {
@@ -214,13 +219,13 @@ async function launchChrome() {
     chrome.stdout.pipe(logStream);
     chrome.stderr.pipe(logStream);
     chrome.unref();
-
+ 
     console.log('正在等待 Chrome 初始化...');
     for (let i = 0; i < 20; i++) {
         if (await checkPort(DEBUG_PORT)) break;
         await new Promise(r => setTimeout(r, 1000));
     }
-
+ 
     if (!await checkPort(DEBUG_PORT)) {
         console.error('Chrome 无法在端口 ' + DEBUG_PORT + ' 上启动');
         if (fs.existsSync('/tmp/chrome_startup.log')) {
@@ -230,7 +235,7 @@ async function launchChrome() {
         throw new Error('Chrome 启动失败');
     }
 }
-
+ 
 async function getExpiryDate(page) {
     try {
         const expiryLoc = page.getByText('Expiry:', { exact: false }).first();
@@ -246,68 +251,52 @@ async function getExpiryDate(page) {
     }
     return null;
 }
-
+ 
 function getUsers() {
-    // 从环境变量读取 JSON 字符串
-    // GitHub Actions Secret: USERS_JSON = [{"username":..., "password":...}]
     try {
         if (process.env.USERS_JSON) {
             const parsed = JSON.parse(process.env.USERS_JSON);
             return Array.isArray(parsed) ? parsed : (parsed.users || []);
         }
+        // 本地降级从 login.json 读取
+        const loginPath = path.join(__dirname, 'login.json');
+        if (fs.existsSync(loginPath)) {
+            const data = fs.readFileSync(loginPath, 'utf8');
+            const json = JSON.parse(data);
+            return Array.isArray(json) ? json : (json.users || []);
+        }
     } catch (e) {
-        console.error('解析 USERS_JSON 环境变量错误:', e);
+        console.error('解析用户数据错误:', e);
     }
     return [];
 }
 
+
 async function attemptTurnstileCdp(page) {
+    // 1. 优先尝试直接点击主页面的 .cf-turnstile 容器
+    try {
+        const container = page.locator('.cf-turnstile').first();
+        if (await container.isVisible({ timeout: 2000 })) {
+            const box = await container.boundingBox();
+            if (box && box.width > 0 && box.height > 0) {
+                // 计算 checkbox 偏移量 (通常占宽度的 12% 左右，垂直居中)
+                const clickX = box.width * 0.12 + (Math.random() * 4 - 2);
+                const clickY = box.height / 2 + (Math.random() * 4 - 2);
+                await container.click({ position: { x: clickX, y: clickY }, timeout: 2000 });
+                console.log(`>> [偏移点击] 成功点击 .cf-turnstile 容器偏置坐标: x=${clickX.toFixed(1)}, y=${clickY.toFixed(1)}`);
+                return true;
+            }
+        }
+    } catch (e) {
+        console.log(`>> [偏移点击] 尝试点击容器失败: ${e.message}`);
+    }
+
+    // 2. 备用方案：遍历 Iframe 并检查内部 checkbox
     const frames = page.frames();
     for (const frame of frames) {
         try {
             const url = frame.url();
             if (url.includes('challenges.cloudflare.com') || url.includes('turnstile')) {
-                console.log(`>> 发现 Turnstile Frame: ${url.substring(0, 80)}...`);
-
-                // 打印完整的 Shadow DOM 树以便诊断
-                const domTree = await frame.evaluate(() => {
-                    function getDeepHTML(node) {
-                        if (!node) return '';
-                        if (node.nodeType === Node.TEXT_NODE) {
-                            return node.textContent.trim();
-                        }
-                        let html = '';
-                        if (node.tagName) {
-                            html += `<${node.tagName.toLowerCase()}`;
-                            if (node.attributes) {
-                                for (let attr of node.attributes) {
-                                    html += ` ${attr.name}="${attr.value}"`;
-                                }
-                            }
-                            html += '>';
-                        }
-
-                        if (node.shadowRoot) {
-                            html += `[ShadowRoot: ${getDeepHTML(node.shadowRoot)}]`;
-                        }
-
-                        if (node.childNodes) {
-                            for (let child of node.childNodes) {
-                                html += getDeepHTML(child);
-                            }
-                        }
-
-                        if (node.tagName) {
-                            html += `</${node.tagName.toLowerCase()}>`;
-                        }
-                        return html;
-                    }
-                    return getDeepHTML(document.body);
-                }).catch(e => `Error: ${e.message}`);
-                
-                console.log('>> [DOM 诊断] HTML 结构如下:\n' + domTree);
-
-                // 尝试多个常见的 Cloudflare Turnstile 交互元素选择器
                 const selectors = [
                     'input[type="checkbox"]',
                     'span.mark',
@@ -316,29 +305,23 @@ async function attemptTurnstileCdp(page) {
                     '#challenge-stage input',
                     '#challenge-stage div'
                 ];
-
                 for (const selector of selectors) {
                     const checkbox = frame.locator(selector);
                     if (await checkbox.count() > 0) {
-                        console.log(`>> 成功匹配选择器: "${selector}"，正在尝试点击...`);
+                        console.log(`>> [Iframe 匹配] 成功匹配选择器: "${selector}"，正在尝试点击...`);
                         await checkbox.first().scrollIntoViewIfNeeded();
                         await page.waitForTimeout(200);
                         try {
                             await checkbox.first().click({ timeout: 2000 });
-                            console.log(`>> 选择器 "${selector}" 点击发送成功！`);
                             return true;
                         } catch (err) {
                             try {
                                 await checkbox.first().click({ force: true, timeout: 2000 });
-                                console.log(`>> 选择器 "${selector}" 强制点击发送成功！`);
                                 return true;
-                            } catch (e2) {
-                                console.log(`>> 选择器 "${selector}" 点击失败: ${e2.message}`);
-                            }
+                            } catch (e2) { }
                         }
                     }
                 }
-                console.log('>> 所有预设选择器均未能匹配成功。');
             }
         } catch (e) { }
     }
@@ -360,7 +343,7 @@ async function attemptTurnstileCdp(page) {
         }
     }
 
-    console.log('正在启动并初始化 Chrome (Persistent Context)...');
+    console.log('正在启动并初始化 Chrome (Standard Context)...');
     const launchArgs = [
         '--no-sandbox',
         '--disable-setuid-sandbox',
@@ -368,7 +351,8 @@ async function attemptTurnstileCdp(page) {
         '--window-size=1280,720',
         '--disable-dev-shm-usage',
         '--no-first-run',
-        '--no-default-browser-check'
+        '--no-default-browser-check',
+        '--disable-blink-features=AutomationControlled'
     ];
 
     const launchOptions = {
@@ -387,10 +371,11 @@ async function attemptTurnstileCdp(page) {
         }
     }
 
-    const context = await chromium.launchPersistentContext('/tmp/chrome_user_data', launchOptions);
+    const browser = await chromium.launch(launchOptions);
     console.log('Chrome 启动成功！');
     
-    let page = context.pages().length > 0 ? context.pages()[0] : await context.newPage();
+    const context = await browser.newContext();
+    let page = await context.newPage();
     page.setDefaultTimeout(60000);
 
     // await page.addInitScript(INJECTED_SCRIPT);
@@ -428,6 +413,9 @@ async function attemptTurnstileCdp(page) {
                 await page.goto('https://dashboard.katabump.com/auth/login');
             }
 
+            const webdriverVal = await page.evaluate(() => navigator.webdriver);
+            console.log(`[诊断] navigator.webdriver = ${webdriverVal}`);
+
             console.log('正在输入凭据...');
             try {
                 const emailInput = page.getByRole('textbox', { name: 'Email' });
@@ -437,59 +425,78 @@ async function attemptTurnstileCdp(page) {
                 await pwdInput.fill(user.password);
                 await page.waitForTimeout(500);
 
-                // --- Cloudflare Turnstile Bypass for Login ---
-                console.log('   >> 正在登录前检查 Turnstile (使用 CDP 绕过)...');
-                let cdpClickResult = false;
-                for (let findAttempt = 0; findAttempt < 15; findAttempt++) {
-                    cdpClickResult = await attemptTurnstileCdp(page);
-                    if (cdpClickResult) break;
-                    await page.waitForTimeout(1000);
-                }
-
-                if (cdpClickResult) {
-                    console.log('   >> 登录 CDP 点击生效。正在等待最多 10秒 Cloudflare 成功标志...');
-                    for (let waitSec = 0; waitSec < 10; waitSec++) {
-                        const frames = page.frames();
-                        let isSuccess = false;
-                        for (const f of frames) {
-                            if (f.url().includes('cloudflare')) {
-                                try {
-                                    if (await f.getByText('Success!', { exact: false }).isVisible({ timeout: 500 })) {
-                                        isSuccess = true;
-                                        break;
-                                    }
-                                } catch (e) { }
+                let loginSuccess = false;
+                for (let loginAttempt = 1; loginAttempt <= 5; loginAttempt++) {
+                    console.log(`   >> [登录尝试 ${loginAttempt}/5] 正在检查并尝试绕过 Turnstile...`);
+                    
+                    console.log('   >> 正在等待 Turnstile 验证通过 (检查 Response Token)...');
+                    let verified = false;
+                    for (let waitSec = 0; waitSec < 15; waitSec++) {
+                        try {
+                            const token = await page.locator('input[name="cf-turnstile-response"]').inputValue({ timeout: 500 });
+                            if (token && token.length > 20) {
+                                console.log('   >> ✅ Turnstile 验证成功 (已生成 token)。');
+                                verified = true;
+                                break;
                             }
-                        }
-                        if (isSuccess) {
-                            console.log('   >> 登录前 Turnstile 验证成功。');
-                            break;
+                        } catch (e) { }
+
+                        // 每次循环或每 3 秒尝试进行一次点击
+                        if (waitSec % 3 === 0) {
+                            await attemptTurnstileCdp(page);
                         }
                         await page.waitForTimeout(1000);
                     }
-                } else {
-                    console.log('   >> 登录前未检测到或未点击 Turnstile，继续操作...');
-                }
-                // --------------------------------------------
 
-                await page.getByRole('button', { name: 'Login', exact: true }).click();
-
-                // User Request: Check for incorrect password
-                try {
-                    const errorMsg = page.getByText('Incorrect password or no account');
-                    if (await errorMsg.isVisible({ timeout: 3000 })) {
-                        console.error(`   >> ❌ 登录失败: 用户 ${user.username} 账号或密码错误`);
-                        const failShotPath = path.join(photoDir, `${safeUsername}.png`);
-                        try { await page.screenshot({ path: failShotPath, fullPage: true }); } catch (e) { }
-
-                        await sendTelegramMessage(`❌ *登录失败*\n用户: ${user.username}\n原因: 账号或密码错误`, failShotPath);
-
-                        continue;
+                    if (!verified) {
+                        console.log('   >> 未检测到 Turnstile 成功标志，继续尝试提交登录...');
                     }
-                } catch (e) { }
+
+                    await page.getByRole('button', { name: 'Login', exact: true }).click();
+                    await page.waitForTimeout(3000); // 等待页面反应
+
+                    // 1. 检查是否成功登录并跳转到 dashboard
+                    if (page.url().includes('dashboard') && !page.url().includes('login')) {
+                        console.log('   >> ✅ 登录成功！已进入控制台。');
+                        loginSuccess = true;
+                        break;
+                    }
+
+                    // 2. 检查是否账号或密码错误 (如果是，直接跳过并报警)
+                    try {
+                        const errorMsg = page.getByText('Incorrect password or no account');
+                        if (await errorMsg.isVisible({ timeout: 1000 })) {
+                            console.error(`   >> ❌ 登录失败: 用户 ${user.username} 账号或密码错误`);
+                            const failShotPath = path.join(photoDir, `${safeUsername}.png`);
+                            try { await page.screenshot({ path: failShotPath, fullPage: true }); } catch (e) { }
+                            await sendTelegramMessage(`❌ *登录失败*\n用户: ${user.username}\n原因: 账号或密码错误`, failShotPath);
+                            throw new Error('PASSWORD_INCORRECT');
+                        }
+                    } catch (e) {
+                        if (e.message === 'PASSWORD_INCORRECT') throw e;
+                    }
+
+                    // 3. 检查是否有 "Please complete captcha" 的报错，如果是，继续下一次循环解决验证码
+                    try {
+                        const captchaMsg = page.getByText('Please complete captcha');
+                        if (await captchaMsg.isVisible({ timeout: 1000 })) {
+                            console.log('   >> ⚠️ 登录失败，提示 "Please complete captcha"。准备重试解决验证码...');
+                            continue;
+                        }
+                    } catch (e) { }
+
+                    console.log('   >> 未跳转，将重新检查并尝试解决验证码...');
+                }
+
+                if (!loginSuccess && !page.url().includes('dashboard')) {
+                    throw new Error('LOGIN_FAILED');
+                }
 
             } catch (e) {
-                console.log('登录错误:', e.message);
+                if (e.message === 'PASSWORD_INCORRECT') {
+                    continue; // 密码错误直接进入下一个用户
+                }
+                throw e; // 抛出错误给外层 catch，标记为登录失败跳过
             }
 
             console.log('正在寻找 "See" 链接...');
@@ -720,7 +727,14 @@ async function attemptTurnstileCdp(page) {
                 }
             }
         } catch (err) {
-            console.error(`Error processing user:`, err);
+            if (err.message === 'LOGIN_FAILED') {
+                console.error(`❌ 用户 ${user.username} 登录失败（卡验证码或超时），已跳过该用户。`);
+                const failShotPath = path.join(photoDir, `${safeUsername}_login_fail.png`);
+                try { await page.screenshot({ path: failShotPath, fullPage: true }); } catch (e) { }
+                await sendTelegramMessage(`⚠️ *登录失败 (超时/卡验证码)*\n用户: ${user.username}\n请检查网络代理或账号验证状态。`, failShotPath);
+            } else {
+                console.error(`Error processing user:`, err);
+            }
         }
 
         // Snapshot before handling next user
@@ -737,6 +751,6 @@ async function attemptTurnstileCdp(page) {
     }
 
     console.log('完成。');
-    await context.close();
+    await browser.close();
     process.exit(0);
 })();

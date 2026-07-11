@@ -5,3 +5,6 @@ ChromeData_Katabump/
 *.log
 .DS_Store
 photo/
+cookies.txt
+screenshots/
+chrome_test_profile/
