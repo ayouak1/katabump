@@ -265,10 +265,11 @@ async function attemptTurnstileCdp(page) {
     const frames = page.frames();
     for (const frame of frames) {
         try {
-            const data = await frame.evaluate(() => window.__turnstile_data).catch(() => null);
-
-            if (data) {
-                console.log('>> 在 frame 中发现 Turnstile。比例:', data);
+            const url = frame.url();
+            if (url.includes('challenges.cloudflare.com') || url.includes('turnstile')) {
+                // 标准 Turnstile 验证码框的复选框固定在左侧约 7% 宽度处，垂直居中
+                const data = { xRatio: 0.07, yRatio: 0.5 };
+                console.log('>> 发现 Turnstile Frame:', url);
 
                 const iframeElement = await frame.frameElement();
                 if (!iframeElement) continue;
@@ -279,28 +280,25 @@ async function attemptTurnstileCdp(page) {
                 const clickX = box.x + (box.width * data.xRatio);
                 const clickY = box.y + (box.height * data.yRatio);
 
-                console.log(`>> 视口点击坐标: (${clickX.toFixed(2)}, ${clickY.toFixed(2)})`);
+                console.log(`>> 视口点击目标坐标: (${clickX.toFixed(2)}, ${clickY.toFixed(2)})`);
 
-                // 获取浏览器视口在屏幕上的实际偏移量
-                const viewportInfo = await page.evaluate(() => ({
-                    screenX: window.screenX || 0,
-                    screenY: window.screenY || 0,
-                    toolbarH: window.outerHeight - window.innerHeight
-                }));
+                // 1. 模拟鼠标从随机位置滑入
+                const startX = 100 + Math.random() * 200;
+                const startY = 100 + Math.random() * 200;
+                await page.mouse.move(startX, startY);
+                await page.waitForTimeout(100 + Math.random() * 100);
 
-                // 将视口坐标转换为 xvfb 屏幕绝对坐标
-                const screenX = Math.round(viewportInfo.screenX + clickX);
-                const screenY = Math.round(viewportInfo.screenY + viewportInfo.toolbarH + clickY);
+                // 2. 平滑滑动到目标坐标 (通过 steps 模拟阻尼)
+                const steps = 12 + Math.floor(Math.random() * 5);
+                await page.mouse.move(clickX, clickY, { steps });
+                await page.waitForTimeout(200 + Math.random() * 200);
 
-                console.log(`>> 屏幕绝对坐标: (${screenX}, ${screenY}), 工具栏高度=${viewportInfo.toolbarH}`);
+                // 3. 物理按压与释放
+                await page.mouse.down();
+                await page.waitForTimeout(50 + Math.random() * 100);
+                await page.mouse.up();
 
-                // 使用 xdotool 发送真实 X11 系统级鼠标事件（非 CDP 合成事件）
-                const { execSync } = require('child_process');
-                execSync(`xdotool mousemove --sync ${screenX} ${screenY}`);
-                await new Promise(r => setTimeout(r, 200 + Math.random() * 300));
-                execSync(`xdotool click 1`);
-
-                console.log('>> xdotool X11 真实点击已发送。');
+                console.log('>> Playwright 仿真平滑点击已发送。');
                 return true;
             }
         } catch (e) { }
@@ -357,8 +355,8 @@ async function attemptTurnstileCdp(page) {
         await context.setHTTPCredentials(null);
     }
 
-    await page.addInitScript(INJECTED_SCRIPT);
-    console.log('注入脚本已添加。');
+    // await page.addInitScript(INJECTED_SCRIPT);
+    // console.log('注入脚本已添加。');
 
     for (let i = 0; i < users.length; i++) {
         const user = users[i];
@@ -374,7 +372,7 @@ async function attemptTurnstileCdp(page) {
             if (page.isClosed()) {
                 page = await context.newPage();
                 // Context credentials apply
-                await page.addInitScript(INJECTED_SCRIPT);
+                // await page.addInitScript(INJECTED_SCRIPT);
             }
 
             // --- 登录逻辑 (简略版，逻辑一致) ---

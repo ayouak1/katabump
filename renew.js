@@ -214,56 +214,43 @@ async function attemptTurnstileCdp(page) {
     const frames = page.frames();
     for (const frame of frames) {
         try {
-            // 检查当前 Frame 是否捕获到了 Turnstile 数据
-            const data = await frame.evaluate(() => window.__turnstile_data).catch(() => null);
+            const url = frame.url();
+            if (url.includes('challenges.cloudflare.com') || url.includes('turnstile')) {
+                // 标准 Turnstile 验证码框的复选框固定在左侧约 7% 宽度处，垂直居中
+                const data = { xRatio: 0.07, yRatio: 0.5 };
+                console.log('>> Found Turnstile frame:', url);
 
-            if (data) {
-                console.log('>> Found Turnstile in frame. Ratios:', data);
-
-                // 获取 iframe 元素在主页面中的位置
                 const iframeElement = await frame.frameElement();
                 if (!iframeElement) continue;
 
                 const box = await iframeElement.boundingBox();
                 if (!box) continue;
 
-                // 计算绝对坐标：iframe 左上角 + (iframe 宽/高 * 比例)
                 const clickX = box.x + (box.width * data.xRatio);
                 const clickY = box.y + (box.height * data.yRatio);
 
-                console.log(`>> Calculated absolute click coordinates: (${clickX.toFixed(2)}, ${clickY.toFixed(2)})`);
+                console.log(`>> Viewport target click coordinates: (${clickX.toFixed(2)}, ${clickY.toFixed(2)})`);
 
-                // 创建 CDP 会话并发送点击命令
-                const client = await page.context().newCDPSession(page);
+                // 1. 模拟鼠标从随机位置滑入
+                const startX = 100 + Math.random() * 200;
+                const startY = 100 + Math.random() * 200;
+                await page.mouse.move(startX, startY);
+                await page.waitForTimeout(100 + Math.random() * 100);
 
-                // 1. Mouse Pressed
-                await client.send('Input.dispatchMouseEvent', {
-                    type: 'mousePressed',
-                    x: clickX,
-                    y: clickY,
-                    button: 'left',
-                    clickCount: 1
-                });
+                // 2. 平滑滑动到目标坐标 (通过 steps 模拟阻尼)
+                const steps = 12 + Math.floor(Math.random() * 5);
+                await page.mouse.move(clickX, clickY, { steps });
+                await page.waitForTimeout(200 + Math.random() * 200);
 
-                // 模拟人类点击持续时间 (50ms - 150ms)
-                await new Promise(r => setTimeout(r, 50 + Math.random() * 100));
+                // 3. 物理按压与释放
+                await page.mouse.down();
+                await page.waitForTimeout(50 + Math.random() * 100);
+                await page.mouse.up();
 
-                // 2. Mouse Released
-                await client.send('Input.dispatchMouseEvent', {
-                    type: 'mouseReleased',
-                    x: clickX,
-                    y: clickY,
-                    button: 'left',
-                    clickCount: 1
-                });
-
-                console.log('>> CDP Click sent successfully.');
-                await client.detach();
-                return true; // 成功点击
+                console.log('>> Playwright native mouse click sent.');
+                return true;
             }
-        } catch (e) {
-            // 忽略 Frame 访问错误（跨域等）
-        }
+        } catch (e) { }
     }
     return false;
 }
@@ -322,8 +309,8 @@ async function attemptTurnstileCdp(page) {
 
     // --- 关键：注入 Hook 脚本 ---
     // 这会在每次页面加载/导航前执行，确保能拦截到 Turnstile 的创建
-    await page.addInitScript(INJECTED_SCRIPT);
-    console.log('Injection script added to page context.');
+    // await page.addInitScript(INJECTED_SCRIPT);
+    // console.log('Injection script added to page context.');
 
     for (let i = 0; i < users.length; i++) {
         const user = users[i];
@@ -333,7 +320,7 @@ async function attemptTurnstileCdp(page) {
             if (page.isClosed()) {
                 page = await context.newPage();
                 // Context credentials should persist, no need to re-auth per page
-                await page.addInitScript(INJECTED_SCRIPT); // 新页面也要注入
+                // await page.addInitScript(INJECTED_SCRIPT); // 新页面也要注入
             }
 
             // 登录逻辑保持不变...
