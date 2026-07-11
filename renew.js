@@ -422,6 +422,18 @@ async function attemptTurnstileCdp(page) {
                 console.log('Login form interaction error (maybe already logged in?):', e.message);
             }
 
+            console.log('Waiting for login redirect to dashboard...');
+            try {
+                await page.waitForURL(url => url.href.includes('dashboard') || url.href.includes('servers'), { timeout: 15000 });
+                console.log('   >> Login successful, entered dashboard.');
+            } catch (e) {
+                console.error(`   >> ❌ Login failed: User ${user.username} failed to redirect to dashboard (possible Turnstile captcha block)`);
+                const photoDir = path.join(__dirname, 'photo');
+                if (!fs.existsSync(photoDir)) fs.mkdirSync(photoDir, { recursive: true });
+                try { await page.screenshot({ path: path.join(photoDir, `${user.username}_login_fail.png`), fullPage: true }); } catch (err) { }
+                continue;
+            }
+
             console.log('Waiting for "See" link...');
             try {
                 await page.getByRole('link', { name: 'See' }).first().waitFor({ timeout: 15000 });

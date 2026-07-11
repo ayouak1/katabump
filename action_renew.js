@@ -458,6 +458,18 @@ async function attemptTurnstileCdp(page) {
                 console.log('登录错误:', e.message);
             }
 
+            console.log('正在等待登录成功并跳转到控制台首页...');
+            try {
+                await page.waitForURL(url => url.href.includes('dashboard') || url.href.includes('servers'), { timeout: 15000 });
+                console.log('   >> 登录成功，已进入控制台。');
+            } catch (e) {
+                console.error(`   >> ❌ 登录失败: 用户 ${user.username} 登录后未能成功跳转到控制台首页 (可能卡在 Turnstile 验证码)`);
+                const errShotPath = path.join(photoDir, `${safeUsername}_login_fail.png`);
+                try { await page.screenshot({ path: errShotPath, fullPage: true }); } catch (err) { }
+                await sendTelegramMessage(`❌ *登录失败 (超时/卡验证码)*\n用户: ${user.username}\n原因: 15秒内未能成功跳转到控制台首页，页面依然卡在验证码。`, errShotPath);
+                continue;
+            }
+
             console.log('正在寻找 "See" 链接...');
             try {
                 await page.getByRole('link', { name: 'See' }).first().waitFor({ timeout: 15000 });
