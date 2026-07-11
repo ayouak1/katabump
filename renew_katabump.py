@@ -19,6 +19,7 @@ from selenium.webdriver.common.action_chains import ActionChains
 from selenium.common.exceptions import TimeoutException, WebDriverException
 
 # ===================== 配置 =====================
+os.environ['NO_PROXY'] = 'localhost,127.0.0.1'
 HEADLESS = os.getenv('HEADLESS', 'false').lower() == 'true'
 ACCOUNTS_ENV = os.getenv('USERS_JSON', os.getenv('ACCOUNTS', ''))
 PROXY_SERVER = os.getenv('HTTP_PROXY', os.getenv('HTTPS_PROXY', ''))
