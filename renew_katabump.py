@@ -191,6 +191,7 @@ class KataBumpRenew:
         opts.add_argument('--disable-dev-shm-usage')
         opts.add_argument('--disable-blink-features=AutomationControlled')
         opts.add_argument('--remote-allow-origins=*')
+        opts.add_argument('--remote-debugging-port=9222')
         if PROXY_SERVER:
             ext_dir = create_proxy_extension(PROXY_SERVER)
             if ext_dir:
