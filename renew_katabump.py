@@ -3,7 +3,7 @@
 KataBump 自动续期脚本 (基于 SeleniumBase UC Mode)
 
 参考: peiqzh/Auto-Renew-Katabump + liveqte/Auto-Renew-Katabump + ayouak1/TWOKataBump-AutoRenew
-核心: 使用 SeleniumBase UC Mode 自动过 Turnstile 验证 + Cookie 持久化免登录
+核心: 使用 SeleniumBase UC Mode 自动过 Turnstile 验证 (全自动代理模式)
 """
 
 import os, sys, time, logging, random, re, json
@@ -18,11 +18,8 @@ ACCOUNTS_ENV = os.getenv('USERS_JSON', os.getenv('ACCOUNTS', ''))
 TG_BOT_TOKEN = os.getenv('TG_BOT_TOKEN', os.getenv('BOT_TOKEN', ''))
 TG_CHAT_ID = os.getenv('TG_CHAT_ID', os.getenv('CHAT_ID', ''))
 
-# GHA 环境判定：如果在 GitHub Actions 中运行，忽略代理使用 Azure 优质高信誉原生 IP 绕过 CF 验证
-IS_GHA = os.getenv('GITHUB_ACTIONS') == 'true'
+# 代理服务器配置（通过环境变量载入，不排除 GHA）
 PROXY_SERVER = os.getenv('HTTP_PROXY', os.getenv('HTTPS_PROXY', ''))
-if IS_GHA:
-    PROXY_SERVER = ''
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -68,121 +65,63 @@ class KataBumpRenew:
         self.masked = mask_email(user)
         self.screenshot_path = None
 
-    def get_cookie_filename(self):
-        # 根据用户名生成唯一的 cookie 文件名，防止多账号混淆
-        user_clean = re.sub(r'[^a-zA-Z0-9]', '_', self.user.split('@')[0])
-        return f"cookies_{user_clean}.json"
-
-    def save_cookies(self, sb):
-        try:
-            cookies = sb.driver.get_cookies()
-            cookie_path = os.path.join(os.getcwd(), self.get_cookie_filename())
-            with open(cookie_path, 'w', encoding='utf-8') as f:
-                json.dump(cookies, f, indent=4)
-            logger.info(f"💾 成功保存最新 Session Cookies 到: {cookie_path}")
-        except Exception as e:
-            logger.warning(f"保存 Cookies 失败: {e}")
-
-    def load_cookies(self, sb):
-        cookie_path = os.path.join(os.getcwd(), self.get_cookie_filename())
-        if not os.path.exists(cookie_path):
-            logger.info(f"ℹ️ 未找到 {self.get_cookie_filename()}，将使用密码登录流程")
-            return False
-
-        try:
-            # 必须先打开目标域名下的网页，才能设置该域名下的 Cookie
-            sb.open("https://dashboard.katabump.com/auth/login")
-            sb.sleep(2)
-            
-            with open(cookie_path, 'r', encoding='utf-8') as f:
-                cookies = json.load(f)
-                
-            for c in cookies:
-                if 'expiry' in c:
-                    c['expiry'] = int(c['expiry'])
-                sb.driver.add_cookie(c)
-                
-            logger.info("🔑 已注入 Cookies，正在尝试访问控制台...")
-            sb.open("https://dashboard.katabump.com/")
-            sb.sleep(5)
-            
-            # 判断是否已登录：若仍留在 login 页面，说明 Cookie 失效
-            if "login" in sb.get_current_url():
-                logger.warning("⚠️ Cookies 已失效，将降级使用密码登录流程")
-                return False
-                
-            logger.info("🎉 成功通过 Cookie 绕过登录与验证码！")
-            return True
-        except Exception as e:
-            logger.warning(f"注入 Cookies 失败: {e}，将使用密码登录流程")
-            return False
-
     def process(self, sb):
         """主续期流程"""
-        # 尝试载入 Cookie 免密免验证登录
-        logged_in = self.load_cookies(sb)
+        logger.info(f"🚀 访问登录页: {self.masked}")
+        sb.open("https://dashboard.katabump.com/auth/login")
+        sb.sleep(5)
 
-        if not logged_in:
-            logger.info(f"🚀 访问登录页: {self.masked}")
-            sb.open("https://dashboard.katabump.com/auth/login")
-            sb.sleep(5)
+        # 输入邮箱
+        logger.info(f"📝 填写邮箱...")
+        sb.type("input#email", self.user)
+        sb.sleep(1.5)
 
-            # 输入邮箱
-            logger.info(f"📝 填写邮箱...")
-            sb.type("input#email", self.user)
-            sb.sleep(1.5)
+        # 输入密码
+        logger.info(f"🔒 填写密码...")
+        sb.type("input#password", self.password)
+        sb.sleep(1.5)
 
-            # 输入密码
-            logger.info(f"🔒 填写密码...")
-            sb.type("input#password", self.password)
-            sb.sleep(1.5)
+        # 尝试绕过 Turnstile
+        logger.info(f"🛡️ 正在尝试过 Turnstile 验证码...")
+        try:
+            # SeleniumBase 强大的内置 CAPTCHA 物理点击绕过
+            sb.solve_captcha()
+            logger.info("✅ Turnstile 解决完成")
+        except Exception as e:
+            logger.warning(f"⚠️ CAPTCHA 解决尝试遇到问题: {e}")
 
-            # 尝试绕过 Turnstile
-            logger.info(f"🛡️ 正在尝试过 Turnstile 验证码...")
+        # 轮询验证码 response token 是否生成 (双重确认)
+        for _ in range(15):
+            token = sb.execute_script(
+                'return document.querySelector("input[name=\'cf-turnstile-response\']").value;')
+            if token and len(token) > 20:
+                logger.info("✅ Turnstile 验证已成功通过!")
+                break
+            sb.sleep(1)
+
+        # 点击登录
+        logger.info(f"📤 提交登录...")
+        try:
+            sb.click('button[type="submit"]')
+        except Exception as e:
+            logger.warning(f"正常点击提交被拦截，尝试 JS 强制点击: {e}")
+            sb.execute_script('document.querySelector("button[type=\'submit\']").click();')
+        sb.sleep(6)
+
+        # 检查是否登陆成功
+        if "login" in sb.get_current_url():
+            # 检查密码错误
             try:
-                sb.solve_captcha()
-                logger.info("✅ Turnstile 解决完成")
-            except Exception as e:
-                logger.warning(f"⚠️ CAPTCHA 解决尝试遇到问题: {e}")
-
-            # 轮询验证码 response token 是否生成 (双重确认)
-            for _ in range(15):
-                token = sb.execute_script(
-                    'return document.querySelector("input[name=\'cf-turnstile-response\']").value;')
-                if token and len(token) > 20:
-                    logger.info("✅ Turnstile 验证已成功通过!")
-                    break
-                sb.sleep(1)
-
-            # 点击登录
-            logger.info(f"📤 提交登录...")
-            try:
-                sb.click('button[type="submit"]')
-            except Exception as e:
-                logger.warning(f"正常点击提交被拦截，尝试 JS 强制点击: {e}")
-                sb.execute_script('document.querySelector("button[type=\'submit\']").click();')
-            sb.sleep(6)
-
-            # 检查是否登陆成功
-            if "login" in sb.get_current_url():
-                # 检查密码错误
-                try:
-                    if sb.is_text_visible("Incorrect password", "body"):
-                        return False, f"❌ {self.masked} 账号或密码错误"
-                except:
-                    pass
-                raise Exception("登录失败 — 仍在登录页，可能验证码未通过")
-
-            # 登录成功，立即保存最新的 Cookie
-            self.save_cookies(sb)
+                if sb.is_text_visible("Incorrect password", "body"):
+                    return False, f"❌ {self.masked} 账号或密码错误"
+            except:
+                pass
+            raise Exception("登录失败 — 仍在登录页，可能验证码未通过")
 
         # 进入服务器控制详情
         logger.info(f"🎯 正在进入服务器管理页...")
         sb.click("//a[contains(text(), 'See')]")
         sb.sleep(5)
-        
-        # 再次保存最新 Cookie（以防跳转带上 cf_clearance 等新凭证）
-        self.save_cookies(sb)
 
         # 检查到期时间
         logger.info(f"📅 正在检查到期日期...")
@@ -359,7 +298,7 @@ def main():
         send_tg("❌ KataBump 续期失败\n原因: 未配置任何账户")
         sys.exit(1)
 
-    logger.info(f"📋 共加载 {len(accounts)} 个账户")
+    logger.info(f"📋 共加载 {len(accounts)} 个账号")
     results = []
     success_count = 0
 
