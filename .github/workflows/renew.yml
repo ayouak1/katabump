@@ -13,36 +13,15 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     
-    - name: Set up Node.js
-      uses: actions/setup-node@v4
+    - name: Set up Go
+      uses: actions/setup-go@v5
       with:
-        node-version: '20'
-        
-    - name: Install System Dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y xvfb dbus-x11 google-chrome-stable || true
-        # 如果 apt 源没有 Chrome，从官方下载
-        if ! command -v google-chrome &> /dev/null; then
-          wget -q https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
-          sudo dpkg -i google-chrome-stable_current_amd64.deb || sudo apt-get -f install -y
-        fi
-        
-    - name: Install Node Dependencies
-      run: npm ci || npm install
+        go-version: '1.21'
 
-    - name: Install Playwright Chromium
-      run: npx playwright install chromium
-
-    - name: Run Renew Script
+    - name: Run Go Fingerprint Test
       env:
         USERS_JSON: ${{ secrets.USERS_JSON }}
-        HTTP_PROXY: ${{ secrets.HTTP_PROXY }}
-        TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
-        TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-        KATABUMP_COOKIES: ${{ secrets.KATABUMP_COOKIES }}
-        NO_PROXY: localhost,127.0.0.1
-      run: dbus-run-session -- xvfb-run --auto-servernum --server-args="-screen 0 1280x720x24" node action_renew.js
+      run: go run main.go
 
     - name: Upload Screenshots
       if: always()
