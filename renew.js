@@ -216,44 +216,27 @@ async function attemptTurnstileCdp(page) {
         try {
             const url = frame.url();
             if (url.includes('challenges.cloudflare.com') || url.includes('turnstile')) {
-                const iframeElement = await frame.frameElement();
-                if (!iframeElement) continue;
+                console.log(`>> Found Turnstile frame: ${url.substring(0, 80)}...`);
 
-                const box = await iframeElement.boundingBox();
-                if (!box) continue;
-
-                console.log(`>> Found Turnstile frame: ${url.substring(0, 80)}... Size: ${box.width}x${box.height}, Pos: (${box.x}, ${box.y})`);
-
-                // 仅点击可见的、宽度符合正常验证框（宽度通常为 300px，高度约 65px）的 iframe
-                if (box.width < 100 || box.height < 20) {
-                    console.log('>> Frame size does not match visible verification box, skipping...');
-                    continue;
+                const checkbox = frame.locator('input[type="checkbox"]');
+                if (await checkbox.count() > 0) {
+                    console.log('>> Found Turnstile checkbox, simulating click...');
+                    
+                    await checkbox.scrollIntoViewIfNeeded();
+                    await page.waitForTimeout(200 + Math.random() * 200);
+                    
+                    try {
+                        await checkbox.click({ timeout: 3000 });
+                        console.log('>> Click sent successfully!');
+                    } catch (err) {
+                        console.log('>> Click failed, trying forced click...');
+                        await checkbox.click({ force: true, timeout: 3000 });
+                        console.log('>> Forced click sent successfully!');
+                    }
+                    return true;
+                } else {
+                    console.log('>> input[type="checkbox"] not found in Turnstile frame.');
                 }
-
-                // 候选的 x 坐标比例，11% 为标准居中，8% 和 14% 为左右热区，确保 100% 击中复选框圆圈
-                const candidates = [
-                    { xRatio: 0.11, yRatio: 0.5 },
-                    { xRatio: 0.08, yRatio: 0.5 },
-                    { xRatio: 0.14, yRatio: 0.5 }
-                ];
-
-                console.log('>> Start clicking candidates in verification area...');
-                for (const candidate of candidates) {
-                    const clickX = box.width * candidate.xRatio;
-                    const clickY = box.height * candidate.yRatio;
-                    console.log(`>> Try clicking relative coords: (${clickX.toFixed(2)}, ${clickY.toFixed(2)})`);
-
-                    await iframeElement.click({
-                        position: { x: clickX, y: clickY },
-                        delay: 50 + Math.random() * 50
-                    });
-
-                    // 每次点击后稍微等待，观察 Cloudflare 是否成功响应
-                    await page.waitForTimeout(1000);
-                }
-
-                console.log('>> All candidate points clicked.');
-                return true;
             }
         } catch (e) { }
     }

@@ -267,44 +267,28 @@ async function attemptTurnstileCdp(page) {
         try {
             const url = frame.url();
             if (url.includes('challenges.cloudflare.com') || url.includes('turnstile')) {
-                const iframeElement = await frame.frameElement();
-                if (!iframeElement) continue;
+                console.log(`>> 发现 Turnstile Frame: ${url.substring(0, 80)}...`);
 
-                const box = await iframeElement.boundingBox();
-                if (!box) continue;
-
-                console.log(`>> 发现 Turnstile Frame: ${url.substring(0, 80)}... 尺寸: ${box.width}x${box.height}，位置: (${box.x}, ${box.y})`);
-
-                // 仅点击可见的、宽度符合正常验证框（宽度通常为 300px，高度约 65px）的 iframe
-                if (box.width < 100 || box.height < 20) {
-                    console.log('>> 该 Frame 尺寸不符合可见验证码框要求，跳过...');
-                    continue;
+                const checkbox = frame.locator('input[type="checkbox"]');
+                if (await checkbox.count() > 0) {
+                    console.log('>> 成功定位到复选框，正在物理模拟点击...');
+                    
+                    // 模拟真实人类滑动并点击
+                    await checkbox.scrollIntoViewIfNeeded();
+                    await page.waitForTimeout(200 + Math.random() * 200);
+                    
+                    try {
+                        await checkbox.click({ timeout: 3000 });
+                        console.log('>> 成功发送普通点击！');
+                    } catch (err) {
+                        console.log('>> 普通点击失败，尝试强制点击...');
+                        await checkbox.click({ force: true, timeout: 3000 });
+                        console.log('>> 成功发送强制点击！');
+                    }
+                    return true;
+                } else {
+                    console.log('>> 未能在该 Frame 中找到 input[type="checkbox"]。');
                 }
-
-                // 候选的 x 坐标比例，11% 为标准居中，8% 和 14% 为左右热区，确保 100% 击中复选框圆圈
-                const candidates = [
-                    { xRatio: 0.11, yRatio: 0.5 },
-                    { xRatio: 0.08, yRatio: 0.5 },
-                    { xRatio: 0.14, yRatio: 0.5 }
-                ];
-
-                console.log('>> 开始对复选框区域进行多点候选仿真点击...');
-                for (const candidate of candidates) {
-                    const clickX = box.width * candidate.xRatio;
-                    const clickY = box.height * candidate.yRatio;
-                    console.log(`>> 尝试点击 iframe 内相对坐标: (${clickX.toFixed(2)}, ${clickY.toFixed(2)})`);
-
-                    await iframeElement.click({
-                        position: { x: clickX, y: clickY },
-                        delay: 50 + Math.random() * 50
-                    });
-
-                    // 每次点击后稍微等待，观察 Cloudflare 是否成功响应
-                    await page.waitForTimeout(1000);
-                }
-
-                console.log('>> 所有候选点点击发送完成。');
-                return true;
             }
         } catch (e) { }
     }
