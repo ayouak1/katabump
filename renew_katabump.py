@@ -116,6 +116,13 @@ class KataBumpRenew:
                     return False, f"❌ {self.masked} 账号或密码错误"
             except:
                 pass
+            # 打印当前页面源码和 URL，方便排查
+            logger.error(f"❌ 登录失败调试信息 - 当前 URL: {sb.get_current_url()}")
+            try:
+                page_text = sb.get_text("body").strip()
+                logger.error(f"❌ 页面主体文字前500字符: {page_text[:500]}")
+            except Exception as read_err:
+                logger.error(f"❌ 读取页面文字失败: {read_err}")
             raise Exception("登录失败 — 仍在登录页，可能验证码未通过")
 
         # 进入服务器控制详情
