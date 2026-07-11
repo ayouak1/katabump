@@ -279,30 +279,28 @@ async function attemptTurnstileCdp(page) {
                 const clickX = box.x + (box.width * data.xRatio);
                 const clickY = box.y + (box.height * data.yRatio);
 
-                console.log(`>> 计算点击坐标: (${clickX.toFixed(2)}, ${clickY.toFixed(2)})`);
+                console.log(`>> 视口点击坐标: (${clickX.toFixed(2)}, ${clickY.toFixed(2)})`);
 
-                const client = await page.context().newCDPSession(page);
+                // 获取浏览器视口在屏幕上的实际偏移量
+                const viewportInfo = await page.evaluate(() => ({
+                    screenX: window.screenX || 0,
+                    screenY: window.screenY || 0,
+                    toolbarH: window.outerHeight - window.innerHeight
+                }));
 
-                await client.send('Input.dispatchMouseEvent', {
-                    type: 'mousePressed',
-                    x: clickX,
-                    y: clickY,
-                    button: 'left',
-                    clickCount: 1
-                });
+                // 将视口坐标转换为 xvfb 屏幕绝对坐标
+                const screenX = Math.round(viewportInfo.screenX + clickX);
+                const screenY = Math.round(viewportInfo.screenY + viewportInfo.toolbarH + clickY);
 
-                await new Promise(r => setTimeout(r, 50 + Math.random() * 100));
+                console.log(`>> 屏幕绝对坐标: (${screenX}, ${screenY}), 工具栏高度=${viewportInfo.toolbarH}`);
 
-                await client.send('Input.dispatchMouseEvent', {
-                    type: 'mouseReleased',
-                    x: clickX,
-                    y: clickY,
-                    button: 'left',
-                    clickCount: 1
-                });
+                // 使用 xdotool 发送真实 X11 系统级鼠标事件（非 CDP 合成事件）
+                const { execSync } = require('child_process');
+                execSync(`xdotool mousemove --sync ${screenX} ${screenY}`);
+                await new Promise(r => setTimeout(r, 200 + Math.random() * 300));
+                execSync(`xdotool click 1`);
 
-                console.log('>> CDP 点击已发送。');
-                await client.detach();
+                console.log('>> xdotool X11 真实点击已发送。');
                 return true;
             }
         } catch (e) { }
