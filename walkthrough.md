@@ -1,5 +1,12 @@
 # 部署与修复工作纪要
 
+## 📡 修复登录卡验证码导致误报“服务器被删”的 Bug (2026-07-11)
+* **修改文件**：[action_renew.js](file:///C:/Users/Administrator/Desktop/1/katabump/action_renew.js#L458-L470) 与 [renew.js](file:///C:/Users/Administrator/Desktop/1/katabump/renew.js#L420-L435)
+* **原因**：当 GitHub Actions 定时任务运行到登录阶段时，如果遇到较强的 Cloudflare Turnstile 验证码拦截导致登录失败/超时，页面会依然停留在 `/auth/login`。因为老版本代码没有在点击 Login 按钮后检验是否成功跳转到 `/dashboard` 首页，就直接继续向下运行寻找 `See` 链接，导致 15 秒超时触发 Catch 块，向 Telegram 误报“未在首页找到您的服务器（服务器被删）”。
+* **修复**：在点击 Login 按钮后，强制引入 `page.waitForURL` 监听 URL 中是否包含了 `dashboard` 或者是 `servers`。只有确认成功进入系统后台后，才继续运行。若 15 秒内未完成跳转，则将其准确判定为“登录失败 (超时/卡验证码)”并跳过该用户，从而彻底杜绝了因登录失败产生误报高危警报的隐患。
+
+---
+
 ## 📡 重构 Katabump 判定逻辑以防御“假成功误报”漏洞 (2026-07-11)
 
 针对前一次判定模态框消失即成功从而引发的服务器 305688 逾期被删故障，我们重构了核心验证机制：
