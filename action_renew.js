@@ -481,7 +481,7 @@ async function attemptTurnstileCdp(page) {
 
             console.log('正在等待登录成功并跳转到控制台首页...');
             try {
-                await page.waitForURL(url => url.href.includes('dashboard') || url.href.includes('servers'), { timeout: 15000 });
+                await page.waitForURL(url => !url.href.includes('/auth/login') && (url.href.includes('dashboard') || url.href.includes('servers')), { timeout: 15000 });
                 console.log('   >> 登录成功，已进入控制台。');
             } catch (e) {
                 console.error(`   >> ❌ 登录失败: 用户 ${user.username} 登录后未能成功跳转到控制台首页 (可能卡在 Turnstile 验证码)`);

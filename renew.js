@@ -444,7 +444,7 @@ async function attemptTurnstileCdp(page) {
 
             console.log('Waiting for login redirect to dashboard...');
             try {
-                await page.waitForURL(url => url.href.includes('dashboard') || url.href.includes('servers'), { timeout: 15000 });
+                await page.waitForURL(url => !url.href.includes('/auth/login') && (url.href.includes('dashboard') || url.href.includes('servers')), { timeout: 15000 });
                 console.log('   >> Login successful, entered dashboard.');
             } catch (e) {
                 console.error(`   >> ❌ Login failed: User ${user.username} failed to redirect to dashboard (possible Turnstile captcha block)`);
