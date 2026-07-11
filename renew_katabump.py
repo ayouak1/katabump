@@ -203,6 +203,12 @@ class KataBumpRenew:
         # 输入邮箱
         logger.info(f"📝 填写邮箱...")
         if not human_type(self.driver, "input#email", self.user):
+            try:
+                logger.error(f"🔍 [诊断] 当前 URL: {self.driver.current_url}")
+                logger.error(f"🔍 [诊断] 页面 Title: {self.driver.title}")
+                logger.error(f"🔍 [诊断] 页面 Source 前 1000 字符: {self.driver.page_source[:1000].strip()}")
+            except Exception as diag_err:
+                logger.error(f"🔍 [诊断] 无法获取诊断信息: {diag_err}")
             raise Exception("未找到邮箱输入框")
         sleep_ms(1000 + random.random() * 1000)
 
