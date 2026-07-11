@@ -3,7 +3,7 @@
 KataBump 自动续期脚本 (基于 SeleniumBase UC Mode)
 
 参考: peiqzh/Auto-Renew-Katabump + liveqte/Auto-Renew-Katabump + ayouak1/TWOKataBump-AutoRenew
-核心: 使用 SeleniumBase UC Mode 自动过 Turnstile 验证 (全自动代理模式)
+核心: 使用 SeleniumBase UC Mode 自动过 Turnstile 验证 (全自动代理模式 + 多级兜底过验证)
 """
 
 import os, sys, time, logging, random, re, json
@@ -18,7 +18,7 @@ ACCOUNTS_ENV = os.getenv('USERS_JSON', os.getenv('ACCOUNTS', ''))
 TG_BOT_TOKEN = os.getenv('TG_BOT_TOKEN', os.getenv('BOT_TOKEN', ''))
 TG_CHAT_ID = os.getenv('TG_CHAT_ID', os.getenv('CHAT_ID', ''))
 
-# 代理服务器配置（通过环境变量载入，不排除 GHA）
+# 代理服务器配置
 PROXY_SERVER = os.getenv('HTTP_PROXY', os.getenv('HTTPS_PROXY', ''))
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -84,9 +84,48 @@ class KataBumpRenew:
         # 尝试绕过 Turnstile
         logger.info(f"🛡️ 正在尝试过 Turnstile 验证码...")
         try:
-            # SeleniumBase 强大的内置 CAPTCHA 物理点击绕过
-            sb.solve_captcha()
-            logger.info("✅ Turnstile 解决完成")
+            # 1. 检查是否已经自动通过
+            token = sb.execute_script('return document.querySelector("input[name=\'cf-turnstile-response\']").value;')
+            if token and len(token) > 20:
+                logger.info("✅ Turnstile 已经自动静默通过")
+            else:
+                # 2. 尝试切换 iframe 进行精确的 CDP 点击
+                iframe_selector = "iframe[src*='challenges.cloudflare.com']"
+                try:
+                    sb.wait_for_element_present(iframe_selector, timeout=8)
+                    logger.info("ℹ️ 发现 Turnstile iframe，正在切换并执行 CDP 穿透点击...")
+                    sb.driver.uc_switch_to_frame(iframe_selector)
+                    
+                    selectors = [
+                        "span.mark",
+                        ".ctp-checkbox-label",
+                        "input[type='checkbox']",
+                        "#challenge-stage",
+                        ".cb-i"
+                    ]
+                    clicked = False
+                    for sel in selectors:
+                        try:
+                            if sb.is_element_visible(sel):
+                                sb.driver.uc_click(sel)
+                                logger.info(f"✅ 成功点击 Turnstile 内层元素: {sel}")
+                                clicked = True
+                                break
+                        except:
+                            continue
+                            
+                    if not clicked:
+                        # 降级点击 body
+                        sb.driver.uc_click("body")
+                        logger.info("✅ 降级点击 Turnstile iframe body 区域")
+                        
+                    sb.switch_to_default_content()
+                except Exception as frame_err:
+                    logger.warning(f"⚠️ iframe 穿透点击失败: {frame_err}，尝试调用 solve_captcha...")
+                    try: sb.switch_to_default_content()
+                    except: pass
+                    sb.solve_captcha()
+                    logger.info("✅ Turnstile solve_captcha 解决完成")
         except Exception as e:
             logger.warning(f"⚠️ CAPTCHA 解决尝试遇到问题: {e}")
 
