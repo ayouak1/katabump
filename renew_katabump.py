@@ -100,14 +100,6 @@ def send_tg(text, photo_path=None):
         logger.warning(f"TG 发送失败: {e}")
 
 # ===================== 核心 =====================
-class KataBumpRenew:
-    def __init__(self, user, password):
-        self.user = user
-        self.password = password
-        self.masked = mask_email(user)
-        self.driver = None
-        self.screenshot_path = None
-
 def create_proxy_extension(proxy_url):
     """创建包含认证信息的代理插件以绕过 Chrome 不支持命令行代理认证的问题"""
     import zipfile
@@ -178,6 +170,15 @@ def create_proxy_extension(proxy_url):
     except Exception as e:
         logger.warning(f"创建代理插件失败: {e}")
         return None
+
+
+class KataBumpRenew:
+    def __init__(self, user, password):
+        self.user = user
+        self.password = password
+        self.masked = mask_email(user)
+        self.driver = None
+        self.screenshot_path = None
 
     def setup_driver(self):
         opts = Options()
