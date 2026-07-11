@@ -236,27 +236,7 @@ async function attemptTurnstileCdp(page) {
                 // 创建 CDP 会话并发送点击命令
                 const client = await page.context().newCDPSession(page);
 
-                // 1. 模拟鼠标从随机位置平滑滑行到目标复选框位置
-                const startX = 100 + Math.random() * 200;
-                const startY = 100 + Math.random() * 200;
-                const steps = 15;
-                for (let i = 0; i <= steps; i++) {
-                    const ratio = i / steps;
-                    const currentX = startX + (clickX - startX) * ratio;
-                    const currentY = startY + (clickY - startY) * ratio;
-                    await client.send('Input.dispatchMouseEvent', {
-                        type: 'mouseMoved',
-                        x: currentX,
-                        y: currentY
-                    });
-                    // 移动微小延迟，模拟人类阻尼
-                    await new Promise(r => setTimeout(r, 10 + Math.random() * 10));
-                }
-
-                // 悬停人类反应时间
-                await new Promise(r => setTimeout(r, 200 + Math.random() * 300));
-
-                // 2. 发送物理按下与释放事件
+                // 1. Mouse Pressed
                 await client.send('Input.dispatchMouseEvent', {
                     type: 'mousePressed',
                     x: clickX,
@@ -440,18 +420,6 @@ async function attemptTurnstileCdp(page) {
             } catch (e) {
                 // 可能已经登录了，或者是其他 UI 状态
                 console.log('Login form interaction error (maybe already logged in?):', e.message);
-            }
-
-            console.log('Waiting for login redirect to dashboard...');
-            try {
-                await page.waitForURL(url => !url.href.includes('/auth/login') && (url.href.includes('dashboard') || url.href.includes('servers')), { timeout: 15000 });
-                console.log('   >> Login successful, entered dashboard.');
-            } catch (e) {
-                console.error(`   >> ❌ Login failed: User ${user.username} failed to redirect to dashboard (possible Turnstile captcha block)`);
-                const photoDir = path.join(__dirname, 'photo');
-                if (!fs.existsSync(photoDir)) fs.mkdirSync(photoDir, { recursive: true });
-                try { await page.screenshot({ path: path.join(photoDir, `${user.username}_login_fail.png`), fullPage: true }); } catch (err) { }
-                continue;
             }
 
             console.log('Waiting for "See" link...');

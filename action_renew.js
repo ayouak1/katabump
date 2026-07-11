@@ -283,27 +283,6 @@ async function attemptTurnstileCdp(page) {
 
                 const client = await page.context().newCDPSession(page);
 
-                // 1. 模拟鼠标从随机位置平滑滑行到目标复选框位置
-                const startX = 100 + Math.random() * 200;
-                const startY = 100 + Math.random() * 200;
-                const steps = 15;
-                for (let i = 0; i <= steps; i++) {
-                    const ratio = i / steps;
-                    const currentX = startX + (clickX - startX) * ratio;
-                    const currentY = startY + (clickY - startY) * ratio;
-                    await client.send('Input.dispatchMouseEvent', {
-                        type: 'mouseMoved',
-                        x: currentX,
-                        y: currentY
-                    });
-                    // 移动微小延迟，模拟人类阻尼
-                    await new Promise(r => setTimeout(r, 10 + Math.random() * 10));
-                }
-
-                // 悬停人类反应时间
-                await new Promise(r => setTimeout(r, 200 + Math.random() * 300));
-
-                // 2. 发送物理按下与释放事件
                 await client.send('Input.dispatchMouseEvent', {
                     type: 'mousePressed',
                     x: clickX,
@@ -477,18 +456,6 @@ async function attemptTurnstileCdp(page) {
 
             } catch (e) {
                 console.log('登录错误:', e.message);
-            }
-
-            console.log('正在等待登录成功并跳转到控制台首页...');
-            try {
-                await page.waitForURL(url => !url.href.includes('/auth/login') && (url.href.includes('dashboard') || url.href.includes('servers')), { timeout: 15000 });
-                console.log('   >> 登录成功，已进入控制台。');
-            } catch (e) {
-                console.error(`   >> ❌ 登录失败: 用户 ${user.username} 登录后未能成功跳转到控制台首页 (可能卡在 Turnstile 验证码)`);
-                const errShotPath = path.join(photoDir, `${safeUsername}_login_fail.png`);
-                try { await page.screenshot({ path: errShotPath, fullPage: true }); } catch (err) { }
-                await sendTelegramMessage(`❌ *登录失败 (超时/卡验证码)*\n用户: ${user.username}\n原因: 15秒内未能成功跳转到控制台首页，页面依然卡在验证码。`, errShotPath);
-                continue;
             }
 
             console.log('正在寻找 "See" 链接...');
