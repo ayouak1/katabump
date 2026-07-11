@@ -13,19 +13,23 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     
-    - name: Set up Python
-      uses: actions/setup-python@v5
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
       with:
-        python-version: '3.11'
+        node-version: '20'
         
     - name: Install System Dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y xvfb dbus-x11
+        sudo apt-get install -y xvfb dbus-x11 google-chrome-stable || true
+        # 如果 apt 源没有 Chrome，从官方下载
+        if ! command -v google-chrome &> /dev/null; then
+          wget -q https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+          sudo dpkg -i google-chrome-stable_current_amd64.deb || sudo apt-get -f install -y
+        fi
         
-    - name: Install Python Dependencies
-      run: |
-        pip install -r requirements.txt
+    - name: Install Node Dependencies
+      run: npm ci || npm install
 
     - name: Run Renew Script
       env:
@@ -34,7 +38,7 @@ jobs:
         TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
         TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
         NO_PROXY: localhost,127.0.0.1
-      run: dbus-run-session -- xvfb-run --auto-servernum --server-args="-screen 0 1280x720x24" python renew_katabump.py
+      run: dbus-run-session -- xvfb-run --auto-servernum --server-args="-screen 0 1280x720x24" node action_renew.js
 
     - name: Upload Screenshots
       if: always()
