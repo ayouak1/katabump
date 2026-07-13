@@ -53,6 +53,30 @@ async function getExpiryDate(page) {
     }
 }
 
+// 自动回写 Cookie 到 GitHub Secrets
+async function saveCookiesToSecret(context) {
+    if (!process.env.GH_TOKEN) {
+        console.log('[自维护] 未配置 GH_TOKEN 环境变量，跳过 Secret 自动回写。');
+        return;
+    }
+    try {
+        const cookies = await context.cookies();
+        const cookiesStr = JSON.stringify(cookies);
+        const tempPath = path.join(process.cwd(), 'temp_cookies.json');
+        fs.writeFileSync(tempPath, cookiesStr, 'utf-8');
+        
+        console.log('[自维护] 发现有效登录会话，正在将最新 Cookie 自动更新至 GitHub Secrets (KATABUMP_COOKIES)...');
+        const { execSync } = require('child_process');
+        // 使用 shell 输入重定向方式，确保 JSON 传值完美防转义和注入
+        execSync(`gh secret set KATABUMP_COOKIES < "${tempPath}"`, { stdio: 'inherit' });
+        console.log('[自维护] ✅ GitHub Secrets 自动更新成功！');
+        
+        try { fs.unlinkSync(tempPath); } catch (e) {}
+    } catch (err) {
+        console.error('[自维护] ❌ 自动更新 Secrets 失败:', err.message);
+    }
+}
+
 (async () => {
     const photoDir = path.join(process.cwd(), 'screenshots');
     if (!fs.existsSync(photoDir)) fs.mkdirSync(photoDir, { recursive: true });
@@ -124,6 +148,10 @@ async function getExpiryDate(page) {
         }
 
         console.log('✅ 成功进入后台详情页！开始执行续期检查...');
+        
+        // 成功登录后，立即提取并回写最新的 Cookie
+        await saveCookiesToSecret(context);
+
         const originalExpiry = await getExpiryDate(page);
         console.log(`续签前的到期时间: ${originalExpiry || '未获取到'}`);
 
