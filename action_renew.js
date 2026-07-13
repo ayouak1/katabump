@@ -172,28 +172,19 @@ async function saveCookiesToSecret(context) {
             console.log('已点击 Renew 按钮，等待模态框弹出...');
             await page.waitForTimeout(3000);
 
-            // 检查模态框中的 ALTCHA 验证码
-            const altchaWidget = page.locator('altcha-widget, .altcha').first();
+            // 检查模态框中的 ALTCHA 验证码复选框（直接定位 input 规避容器 visibility 误判问题）
+            const checkbox = page.locator('altcha-widget input[type="checkbox"], .altcha input[type="checkbox"]').first();
             try {
-                await altchaWidget.waitFor({ state: 'visible', timeout: 5000 });
+                await checkbox.waitFor({ state: 'visible', timeout: 5000 });
             } catch (e) {}
             
-            if (await altchaWidget.isVisible()) {
-                console.log('发现 ALTCHA 验证组件，尝试点击解决...');
-                const checkbox = altchaWidget.locator('input[type="checkbox"]').first();
-                try {
-                    await checkbox.waitFor({ state: 'visible', timeout: 3000 });
-                } catch (e) {}
-                
-                if (await checkbox.isVisible()) {
-                    await checkbox.click();
-                    console.log('已点击 ALTCHA 复选框，等待 Proof of Work 计算完成...');
-                    await page.waitForTimeout(10000); // ALTCHA 算力通常需要 5-10 秒
-                } else {
-                    console.log('⚠️ 找到 ALTCHA 组件，但未找到复选框，直接点击组件容器...');
-                    await altchaWidget.click();
-                    await page.waitForTimeout(10000);
-                }
+            if (await checkbox.isVisible()) {
+                console.log('发现 ALTCHA 验证复选框，尝试点击解决...');
+                await checkbox.click();
+                console.log('已点击 ALTCHA 复选框，等待 Proof of Work 计算完成...');
+                await page.waitForTimeout(10000); // ALTCHA 算力通常需要 5-10 秒
+            } else {
+                console.log('⚠️ 未检测到 ALTCHA 验证复选框，可能不需要验证或已验证成功，尝试直接提交。');
             }
 
             // 确认 Renew
