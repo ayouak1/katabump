@@ -162,15 +162,22 @@ async function saveCookiesToSecret(context) {
         console.log(`续签前的到期时间: ${originalExpiry || '未获取到'}`);
 
         // 检查 Renew 按钮
-        const renewBtn = page.locator("button:has-text('Renew'), a:has-text('Renew')").first;
-        if (await renewBtn.isVisible({ timeout: 5000 })) {
+        const renewBtn = page.locator("button:has-text('Renew'), a:has-text('Renew')").first();
+        try {
+            await renewBtn.waitFor({ state: 'visible', timeout: 5000 });
+        } catch (e) {}
+        
+        if (await renewBtn.isVisible()) {
             await renewBtn.click();
             console.log('已点击 Renew 按钮，等待模态框弹出...');
             await page.waitForTimeout(3000);
 
             // 检查模态框中的 ALTCHA 验证码
             const altcha = page.locator('altcha').first();
-            if (await altcha.isVisible({ timeout: 3000 })) {
+            try {
+                await altcha.waitFor({ state: 'visible', timeout: 3000 });
+            } catch (e) {}
+            if (await altcha.isVisible()) {
                 console.log('发现 ALTCHA 验证组件，尝试点击解决...');
                 await altcha.click();
                 console.log('已点击 ALTCHA，等待 Proof of Work 计算完成...');
@@ -178,8 +185,11 @@ async function saveCookiesToSecret(context) {
             }
 
             // 确认 Renew
-            const confirmBtn = page.locator("#renew-modal button:has-text('Renew')").first;
-            if (await confirmBtn.isVisible({ timeout: 3000 })) {
+            const confirmBtn = page.locator("#renew-modal button:has-text('Renew')").first();
+            try {
+                await confirmBtn.waitFor({ state: 'visible', timeout: 3000 });
+            } catch (e) {}
+            if (await confirmBtn.isVisible()) {
                 await confirmBtn.click();
                 console.log('已确认 Renew，等待到期日更新...');
                 await page.waitForTimeout(5000);
