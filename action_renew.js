@@ -99,7 +99,7 @@ async function saveCookiesToSecret(context) {
 
     const context = await browser.newContext({
         viewport: { width: 1280, height: 720 },
-        userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:152.0) Gecko/20100101 Firefox/152.0"
     });
 
     // === 核心逻辑: 导入 Cookie 绕过登录 ===
@@ -108,15 +108,21 @@ async function saveCookiesToSecret(context) {
         try {
             const rawCookies = JSON.parse(COOKIES_JSON);
             // 规范化 cookie 格式以适配 Playwright
-            const formattedCookies = rawCookies.map(c => ({
-                name: c.name,
-                value: c.value,
-                domain: c.domain.startsWith('.') ? c.domain : `.${c.domain}`,
-                path: c.path || '/',
-                secure: c.secure !== undefined ? c.secure : true,
-                httpOnly: c.httpOnly !== undefined ? c.httpOnly : false,
-                sameSite: c.sameSite || 'Lax'
-            }));
+            const formattedCookies = rawCookies.map(c => {
+                let sSite = c.sameSite;
+                if (sSite && !['Strict', 'Lax', 'None'].includes(sSite)) {
+                    sSite = 'Lax';
+                }
+                return {
+                    name: c.name,
+                    value: c.value,
+                    domain: c.domain, // 👈 采用原始导出的域，不强制加点
+                    path: c.path || '/',
+                    secure: c.secure !== undefined ? c.secure : true,
+                    httpOnly: c.httpOnly !== undefined ? c.httpOnly : true,
+                    sameSite: sSite || 'Lax'
+                };
+            });
             await context.addCookies(formattedCookies);
             console.log('Cookie 注入成功。');
         } catch (e) {
