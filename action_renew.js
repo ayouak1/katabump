@@ -173,15 +173,27 @@ async function saveCookiesToSecret(context) {
             await page.waitForTimeout(3000);
 
             // 检查模态框中的 ALTCHA 验证码
-            const altcha = page.locator('altcha').first();
+            const altchaWidget = page.locator('altcha-widget, .altcha').first();
             try {
-                await altcha.waitFor({ state: 'visible', timeout: 3000 });
+                await altchaWidget.waitFor({ state: 'visible', timeout: 5000 });
             } catch (e) {}
-            if (await altcha.isVisible()) {
+            
+            if (await altchaWidget.isVisible()) {
                 console.log('发现 ALTCHA 验证组件，尝试点击解决...');
-                await altcha.click();
-                console.log('已点击 ALTCHA，等待 Proof of Work 计算完成...');
-                await page.waitForTimeout(8000); // ALTCHA 算力通常需要 5-8 秒
+                const checkbox = altchaWidget.locator('input[type="checkbox"]').first();
+                try {
+                    await checkbox.waitFor({ state: 'visible', timeout: 3000 });
+                } catch (e) {}
+                
+                if (await checkbox.isVisible()) {
+                    await checkbox.click();
+                    console.log('已点击 ALTCHA 复选框，等待 Proof of Work 计算完成...');
+                    await page.waitForTimeout(10000); // ALTCHA 算力通常需要 5-10 秒
+                } else {
+                    console.log('⚠️ 找到 ALTCHA 组件，但未找到复选框，直接点击组件容器...');
+                    await altchaWidget.click();
+                    await page.waitForTimeout(10000);
+                }
             }
 
             // 确认 Renew
