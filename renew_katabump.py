@@ -76,6 +76,27 @@ class KataBumpRenew:
         curr_url = sb.get_current_url()
         logger.info(f"📄 当前页面 Title: '{curr_title}', URL: '{curr_url}'")
 
+        # ===== 注入 WebGL 显卡与硬件指纹深度伪装 =====
+        try:
+            sb.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
+                "source": '''
+                    // 1. 伪造 WebGL 显卡指纹
+                    const getParameter = WebGLRenderingContext.prototype.getParameter;
+                    WebGLRenderingContext.prototype.getParameter = function(parameter) {
+                        if (parameter === 37445) return "Google Inc. (NVIDIA)";
+                        if (parameter === 37446) return "ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0, D3D11)";
+                        return getParameter.apply(this, arguments);
+                    };
+                    // 2. 伪造硬件参数
+                    Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
+                    Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
+                    Object.defineProperty(navigator, 'webdriver', { get: () => false });
+                    Object.defineProperty(navigator, 'platform', { get: () => 'Win32' });
+                '''
+            })
+        except Exception as cdp_err:
+            logger.warning(f"⚠️ CDP 硬件指纹注入异常: {cdp_err}")
+
         # 针对 Cloudflare 盾页面
         if not curr_title or "Just a moment" in curr_title or "Cloudflare" in curr_title:
             logger.info("🛡️ 检测到 Cloudflare 盾页面，尝试 uc_gui_click_captcha...")
@@ -363,6 +384,12 @@ class KataBumpRenew:
             "incognito": True,
             "window_size": "1920,1080",
             "agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+            "extra_chrome_args": [
+                "--ignore-gpu-blocklist",
+                "--enable-gpu-rasterization",
+                "--enable-zero-copy",
+                "--disable-blink-features=AutomationControlled"
+            ]
         }
         
         if PROXY_SERVER:
