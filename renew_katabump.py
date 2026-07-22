@@ -72,8 +72,30 @@ class KataBumpRenew:
         sb.uc_open_with_reconnect("https://dashboard.katabump.com/auth/login", 6)
         sb.sleep(3)
 
-        # 1. 优先填写邮箱与密码（输入框直接在主文档中）
+        curr_title = sb.get_title()
+        curr_url = sb.get_current_url()
+        logger.info(f"📄 当前页面 Title: '{curr_title}', URL: '{curr_url}'")
+
+        # 处理 Cloudflare "Just a moment..." 五秒盾/人机验证中间页
+        if "Just a moment" in curr_title or "Cloudflare" in curr_title or "Attention Required" in curr_title:
+            logger.info("🛡️ 检测到 Cloudflare 拦截中间页，等待自动或重连解封...")
+            sb.uc_open_with_reconnect("https://dashboard.katabump.com/auth/login", 10)
+            sb.sleep(5)
+            logger.info(f"📄 解封后页面 Title: '{sb.get_title()}', URL: '{sb.get_current_url()}'")
+
+        # 1. 优先等待并填写邮箱与密码
         logger.info(f"📝 填写邮箱...")
+        try:
+            sb.wait_for_element("input#email", timeout=20)
+        except Exception as wait_err:
+            logger.error(f"❌ 页面未出现 input#email！当前 Title: '{sb.get_title()}', URL: '{sb.get_current_url()}'")
+            try:
+                body_snippet = sb.get_text("body")[:300]
+                logger.error(f"❌ 页面内容摘要: {body_snippet}")
+            except:
+                pass
+            raise wait_err
+
         sb.type("input#email", self.user)
         sb.sleep(1)
 
