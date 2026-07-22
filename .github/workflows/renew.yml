@@ -13,6 +13,11 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
+    - name: Setup Cloudflare WARP (解决 GHA Azure 机房 IP 被 CF 拦截问题)
+      uses: fscarmen/warp-on-actions@v1.3
+      with:
+        mode: global
+
     - name: Set up Python 3.10
       uses: actions/setup-python@v5
       with:
