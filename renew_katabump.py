@@ -167,124 +167,46 @@ class KataBumpRenew:
         sb.press_keys("input#password", self.password)
         sb.sleep(1)
 
-        # 2. 尝试过 Turnstile 验证码
-        logger.info(f"🛡️ 正在尝试过 Turnstile 验证码...")
-
-        # 再次诊断当前状态
-        try:
-            init_token = sb.execute_script('return (document.querySelector("input[name=\'cf-turnstile-response\']") || {}).value || "";')
-            logger.info(f"🛡️ 当前 Token 长度: {len(init_token)}")
-        except:
-            init_token = ""
+        # 2. 尝试过 Turnstile 验证码 (点击复选框)
+        logger.info(f"🛡️ 正在尝试解封 Turnstile 验证码...")
 
         def check_token():
-            """检查 Turnstile token 是否已生成"""
             try:
                 t = sb.execute_script('return (document.querySelector("input[name=\'cf-turnstile-response\']") || {}).value || "";')
                 return t if t and len(t) > 20 else ""
             except:
                 return ""
 
-        def try_solve_turnstile(method_label=""):
-            """尝试多种方式求解 Turnstile"""
-
-            # 方式 0: JS API — turnstile.reset() + turnstile.execute() 强制重评估
+        # 尝试标准 SeleniumBase CAPTCHA 自动处理
+        if not check_token():
             try:
-                logger.info(f"🛡️ [{method_label}] 尝试 JS API turnstile.reset + execute...")
-                sb.execute_script('''
-                    if (window.turnstile) {
-                        // 获取所有 widget ID
-                        var container = document.querySelector("div.cf-turnstile");
-                        if (container) {
-                            // 重新清除旧 widget 并重新渲染
-                            try { turnstile.reset(); } catch(e) {}
-                            try { 
-                                turnstile.render(container, {
-                                    sitekey: container.getAttribute("data-sitekey"),
-                                    callback: function(token) {
-                                        var input = document.querySelector("input[name='cf-turnstile-response']");
-                                        if (input) input.value = token;
-                                    }
-                                });
-                            } catch(e) {}
-                        }
-                    }
-                ''')
-                sb.sleep(5)
-                t = check_token()
-                if t:
-                    logger.info(f"✅ [{method_label}] JS API 成功! Token 长度: {len(t)}")
-                    return True
-                logger.info(f"🛡️ [{method_label}] JS API 后 Token 长度: {len(t) if t else 0}")
+                logger.info("🛡️ 执行 uc_gui_handle_captcha()...")
+                sb.uc_gui_handle_captcha()
+                sb.sleep(3)
             except Exception as e:
-                logger.warning(f"⚠️ [{method_label}] JS API 异常: {e}")
+                logger.warning(f"⚠️ uc_gui_handle_captcha 异常: {e}")
 
-            # 方式 1: disconnect + reconnect 技术 — 断开 WebDriver 让 Turnstile 重评估
+        # 若仍未获取到 Token，使用真实坐标/iframe 点击复选框
+        if not check_token():
             try:
-                logger.info(f"🛡️ [{method_label}] 尝试 disconnect/reconnect...")
-                sb.disconnect()
-                sb.sleep(4)
-                sb.reconnect(3)
-                sb.sleep(2)
-                t = check_token()
-                if t:
-                    logger.info(f"✅ [{method_label}] disconnect/reconnect 成功! Token 长度: {len(t)}")
-                    return True
-                logger.info(f"🛡️ [{method_label}] disconnect/reconnect 后 Token 长度: {len(t) if t else 0}")
-            except Exception as e:
-                logger.warning(f"⚠️ [{method_label}] disconnect/reconnect 异常: {e}")
-
-            # 方式 2: uc_gui_click_captcha
-            try:
-                logger.info(f"🛡️ [{method_label}] 尝试 uc_gui_click_captcha()...")
+                logger.info("🛡️ 尝试通过 uc_gui_click_captcha()...")
                 sb.uc_gui_click_captcha()
                 sb.sleep(3)
-                t = check_token()
-                if t:
-                    logger.info(f"✅ [{method_label}] uc_gui_click_captcha 成功! Token 长度: {len(t)}")
-                    return True
-                logger.info(f"🛡️ [{method_label}] uc_gui_click_captcha 后 Token 长度: {len(t) if t else 0}")
             except Exception as e:
-                logger.warning(f"⚠️ [{method_label}] uc_gui_click_captcha 异常: {e}")
+                logger.warning(f"⚠️ uc_gui_click_captcha 异常: {e}")
 
-            return False
+        # 轮询检查 Token 结果 (最多等待 15 秒)
+        token_valid = False
+        for i in range(15):
+            t = check_token()
+            if t:
+                logger.info(f"✅ Turnstile Token 已成功获取 (第 {i+1} 秒, 长度: {len(t)})！")
+                token_valid = True
+                break
+            sb.sleep(1)
 
-        # 第一次尝试求解
-        solved = try_solve_turnstile("Round-1")
-
-        # 轮询等待验证码 token 生成（最多等待 20 秒）
-        if not solved:
-            token_valid = False
-            for i in range(20):
-                t = check_token()
-                if t:
-                    logger.info(f"✅ Turnstile Token 已生成 (第 {i+1} 秒, 长度: {len(t)})")
-                    token_valid = True
-                    break
-
-                # 每 10 秒重试
-                if i == 9 and not token_valid:
-                    logger.info(f"🛡️ 第 {i+1} 秒重试解封 Turnstile...")
-                    try_solve_turnstile("Round-2")
-
-                sb.sleep(1)
-
-            if not token_valid:
-                logger.warning("⚠️ 20 秒内未获取到 Turnstile Token，尝试直接提交...")
-        else:
-            logger.info("✅ Turnstile 已在首轮求解中通过!")
-
-        # 提交前需要重新填写表单（disconnect/reconnect 可能清空了表单）
-        try:
-            email_val = sb.execute_script('return document.querySelector("input#email").value || "";')
-            if not email_val:
-                logger.info("🔄 表单被清空，重新填写...")
-                sb.press_keys("input#email", self.user)
-                sb.sleep(0.5)
-                sb.press_keys("input#password", self.password)
-                sb.sleep(0.5)
-        except:
-            pass
+        if not token_valid:
+            logger.warning("⚠️ 未能在预定时间内自动勾选 Turnstile，尝试直接提交...")
 
         # 4. 点击登录提交
         logger.info(f"📤 提交登录...")
