@@ -93,6 +93,33 @@ class KataBumpRenew:
             except Exception as e1:
                 logger.warning(f"⚠️ uc_gui_click_captcha 尝试: {e1}")
 
+        # 尝试通过 PyAutoGUI 获取真实的 DOM 元素像素坐标进行物理绝对点击
+        if not check_token():
+            try:
+                logger.info("🛡️ 计算 Turnstile 控件绝对屏幕坐标并进行 PyAutoGUI 物理点击...")
+                import pyautogui
+                # 通过 JS 获取 div.cf-turnstile 或 iframe 的屏幕中心坐标
+                coords = sb.execute_script('''
+                    var el = document.querySelector("div.cf-turnstile, iframe[src*='challenges'], div[data-sitekey]");
+                    if (!el) return null;
+                    var rect = el.getBoundingClientRect();
+                    return {
+                        x: Math.round(rect.left + rect.width / 2),
+                        y: Math.round(rect.top + rect.height / 2)
+                    };
+                ''')
+                if coords and coords.get('x') and coords.get('y'):
+                    cx = coords['x']
+                    cy = coords['y']
+                    logger.info(f"📍 控件屏幕坐标: x={cx}, y={cy}，执行物理点击...")
+                    pyautogui.moveTo(cx, cy, duration=0.5)
+                    pyautogui.click(cx, cy)
+                    sb.sleep(4)
+                else:
+                    logger.warning("⚠️ 未能计算出 Turnstile 控件屏幕坐标")
+            except Exception as py_err:
+                logger.warning(f"⚠️ PyAutoGUI 物理点击异常: {py_err}")
+
         if not check_token():
             try:
                 logger.info("🛡️ 执行 uc_gui_handle_captcha()...")
