@@ -85,48 +85,50 @@ class KataBumpRenew:
 
         # 1. 优先尝试过 Turnstile 验证码
         logger.info(f"🛡️ 正在尝试解封/求解 Turnstile 验证码...")
-        if not check_token():
+        for solve_round in range(1, 3):
+            if check_token():
+                break
+
+            logger.info(f"🛡️ [第 {solve_round} 轮解封] 执行 uc_gui_click_captcha()...")
             try:
-                logger.info("🛡️ 执行 uc_gui_click_captcha()...")
                 sb.uc_gui_click_captcha()
                 sb.sleep(3)
             except Exception as e1:
                 logger.warning(f"⚠️ uc_gui_click_captcha 尝试: {e1}")
 
-        # 尝试通过 PyAutoGUI 获取真实的 DOM 元素像素坐标进行物理绝对点击
-        if not check_token():
+            if check_token():
+                break
+
+            # 尝试 PyAutoGUI 真实物理点击
             try:
-                logger.info("🛡️ 计算 Turnstile 控件绝对屏幕坐标并进行 PyAutoGUI 物理点击...")
                 import pyautogui
-                # 通过 JS 获取 div.cf-turnstile 或 iframe 的屏幕中心坐标
                 coords = sb.execute_script('''
                     var el = document.querySelector("div.cf-turnstile, iframe[src*='challenges'], div[data-sitekey]");
                     if (!el) return null;
                     var rect = el.getBoundingClientRect();
-                    return {
-                        x: Math.round(rect.left + rect.width / 2),
-                        y: Math.round(rect.top + rect.height / 2)
-                    };
+                    return { x: Math.round(rect.left + rect.width / 2), y: Math.round(rect.top + rect.height / 2) };
                 ''')
                 if coords and coords.get('x') and coords.get('y'):
                     cx = coords['x']
                     cy = coords['y']
-                    logger.info(f"📍 控件屏幕坐标: x={cx}, y={cy}，执行物理点击...")
-                    pyautogui.moveTo(cx, cy, duration=0.5)
+                    logger.info(f"📍 [第 {solve_round} 轮] 点击物理坐标: x={cx}, y={cy}")
+                    pyautogui.moveTo(cx, cy, duration=0.3)
                     pyautogui.click(cx, cy)
-                    sb.sleep(4)
-                else:
-                    logger.warning("⚠️ 未能计算出 Turnstile 控件屏幕坐标")
+                    sb.sleep(3)
             except Exception as py_err:
-                logger.warning(f"⚠️ PyAutoGUI 物理点击异常: {py_err}")
+                logger.warning(f"⚠️ 物理点击异常: {py_err}")
 
-        if not check_token():
-            try:
-                logger.info("🛡️ 执行 uc_gui_handle_captcha()...")
-                sb.uc_gui_handle_captcha()
-                sb.sleep(3)
-            except Exception as e2:
-                logger.warning(f"⚠️ uc_gui_handle_captcha 尝试: {e2}")
+            if check_token():
+                break
+
+            # 如果依然未生成，触发 uc_open_with_reconnect 重洗 Cloudflare 标记
+            if not check_token() and solve_round == 1:
+                logger.info("🔄 [第 1 轮未通过] 触发 uc_open_with_reconnect 重洗 Cloudflare 环境...")
+                try:
+                    sb.uc_open_with_reconnect("https://dashboard.katabump.com/auth/login", 5)
+                    sb.sleep(3)
+                except Exception as rec_err:
+                    logger.warning(f"⚠️ 重洗环境异常: {rec_err}")
 
         # 2. 等待 Turnstile Token 确认
         token_valid = False
