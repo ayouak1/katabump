@@ -236,8 +236,59 @@ class KataBumpRenew:
         
         if PROXY_SERVER:
             proxy_clean = PROXY_SERVER.replace("http://", "").replace("https://", "")
-            sb_args["proxy"] = proxy_clean
-            # 保证 127.0.0.1/localhost 不走代理，防止 Selenium 本地与 ChromeDriver 通信报 Service Unavailable
+            if "@" in proxy_clean:
+                try:
+                    import base64, socket, threading
+                    user_pass, host_port = proxy_clean.split("@", 1)
+                    up_user, up_pass = user_pass.split(":", 1)
+                    up_host, up_port = host_port.split(":", 1)
+                    
+                    # 启动异步代理转接桥
+                    class LocalAuthBridge(threading.Thread):
+                        def __init__(self, host, port, u, p):
+                            super().__init__(daemon=True)
+                            self.host = host
+                            self.port = int(port)
+                            self.auth = b"Proxy-Authorization: Basic " + base64.b64encode(f"{u}:{p}".encode()) + b"\r\n"
+                        def run(self):
+                            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                            s.bind(('127.0.0.1', 8888))
+                            s.listen(10)
+                            while True:
+                                try:
+                                    cli, _ = s.accept()
+                                    up = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                                    up.connect((self.host, self.port))
+                                    data = cli.recv(4096)
+                                    if b"\r\n\r\n" in data:
+                                        h, b = data.split(b"\r\n\r\n", 1)
+                                        mod = h + b"\r\n" + self.auth + b"\r\n" + b
+                                    else:
+                                        mod = data
+                                    up.sendall(mod)
+                                    def pipe(src, dst):
+                                        try:
+                                            while True:
+                                                buf = src.recv(8192)
+                                                if not buf: break
+                                                dst.sendall(buf)
+                                        except: pass
+                                    threading.Thread(target=pipe, args=(cli, up), daemon=True).start()
+                                    threading.Thread(target=pipe, args=(up, cli), daemon=True).start()
+                                except: pass
+
+                    logger.info("🌉 正在启动本地代理桥接服务 (127.0.0.1:8888)...")
+                    bridge = LocalAuthBridge(up_host, up_port, up_user, up_pass)
+                    bridge.start()
+                    time.sleep(1)
+                    sb_args["proxy"] = "127.0.0.1:8888"
+                except Exception as b_err:
+                    logger.warning(f"⚠️ 启动本地桥接失败: {b_err}，使用原生代理")
+                    sb_args["proxy"] = proxy_clean
+            else:
+                sb_args["proxy"] = proxy_clean
+
             os.environ['NO_PROXY'] = 'localhost,127.0.0.1,127.0.0.0/8,::1'
 
         for attempt in range(max_retries):
