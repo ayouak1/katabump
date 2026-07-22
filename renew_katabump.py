@@ -75,17 +75,17 @@ class KataBumpRenew:
         # 1. 先尝试绕过 Turnstile 并等待 Token 生成
         logger.info(f"🛡️ 正在尝试过 Turnstile 验证码...")
         try:
-            # 使用 SeleniumBase 专用于 Cloudflare Turnstile 的 GUI 点击接口
-            sb.uc_gui_click_cf()
+            # 原生自动求解
+            sb.click_captcha()
             sb.sleep(3)
         except Exception as e:
-            logger.warning(f"⚠️ uc_gui_click_cf 尝试: {e}")
+            logger.warning(f"⚠️ 原生 click_captcha 尝试: {e}")
 
         try:
-            sb.uc_gui_handle_cf()
-            sb.sleep(3)
+            sb.uc_click("div.cf-turnstile")
+            sb.sleep(2)
         except Exception as e:
-            logger.warning(f"⚠️ uc_gui_handle_cf 尝试: {e}")
+            logger.warning(f"⚠️ uc_click 父级容器尝试: {e}")
 
         # 2. 轮询等待验证码 token 生成（最多等待 25 秒）
         token_valid = False
