@@ -14,6 +14,7 @@ from seleniumbase import SB
 
 # ===================== 配置 =====================
 HEADLESS = os.getenv('HEADLESS', 'false').lower() == 'true'
+FORCE_RENEW = os.getenv('FORCE_RENEW', 'false').lower() == 'true'
 ACCOUNTS_ENV = os.getenv('USERS_JSON', os.getenv('ACCOUNTS', ''))
 TG_BOT_TOKEN = os.getenv('TG_BOT_TOKEN', os.getenv('BOT_TOKEN', ''))
 TG_CHAT_ID = os.getenv('TG_CHAT_ID', os.getenv('CHAT_ID', ''))
@@ -191,7 +192,7 @@ class KataBumpRenew:
 
             if expiry_date:
                 days_diff = (expiry_date - today).days
-                if days_diff > 1:
+                if days_diff > 1 and not FORCE_RENEW:
                     notice = f"⏰ {self.masked} - 暂无需续期 (到期日: {expiry_text}, 剩余 {days_diff} 天)"
                     logger.info(notice)
                     return True, notice

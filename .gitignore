@@ -8,3 +8,10 @@ photo/
 cookies.txt
 screenshots/
 chrome_test_profile/
+*.png
+scratch/
+playwright_renew.py
+sb_renew_final.py
+vps_auto_renew.py
+local_auto_renew.py
+renew_vps.py
