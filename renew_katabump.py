@@ -107,63 +107,91 @@ class KataBumpRenew:
 
         # 2. 尝试多重深度辅助过 Turnstile 验证码
         logger.info(f"🛡️ 正在尝试过 Turnstile 验证码...")
-        
-        def try_solve_turnstile():
-            # 方式 1: 使用 SeleniumBase 专用 GUI Captcha 模拟真实鼠标解封
+
+        # 检查 Turnstile iframe 是否存在
+        try:
+            has_iframe = sb.is_element_present("iframe[src*='challenges.cloudflare.com']")
+            logger.info(f"🛡️ Turnstile iframe 存在: {has_iframe}")
+        except:
+            has_iframe = False
+
+        # 检查初始 token 状态
+        try:
+            init_token = sb.execute_script('return (document.querySelector("input[name=\'cf-turnstile-response\']") || {}).value || "";')
+            logger.info(f"🛡️ 初始 Token 长度: {len(init_token)}")
+        except:
+            init_token = ""
+
+        def try_solve_turnstile(method_label=""):
+            """尝试多种方式求解 Turnstile"""
+            # 方式 1: SeleniumBase 专用 GUI Captcha — 模拟真实鼠标点击
             try:
+                logger.info(f"🛡️ [{method_label}] 尝试 uc_gui_click_captcha()...")
                 sb.uc_gui_click_captcha()
-                sb.sleep(2)
+                sb.sleep(3)
+                token = sb.execute_script('return (document.querySelector("input[name=\'cf-turnstile-response\']") || {}).value || "";')
+                if token and len(token) > 20:
+                    logger.info(f"✅ [{method_label}] uc_gui_click_captcha 成功! Token 长度: {len(token)}")
+                    return True
+                logger.info(f"🛡️ [{method_label}] uc_gui_click_captcha 后 Token 长度: {len(token)}")
             except Exception as e:
-                pass
+                logger.warning(f"⚠️ [{method_label}] uc_gui_click_captcha 异常: {e}")
 
-            # 方式 2: 如果尚未生成 Token，切入 Turnstile iframe 内部精确点击复选框
-            token = sb.execute_script('return (document.querySelector("input[name=\'cf-turnstile-response\']") || {}).value;')
-            if not token or len(token) <= 20:
-                try:
-                    if sb.is_element_visible("iframe[src*='challenges.cloudflare.com']"):
-                        logger.info("🛡️ 切入 Turnstile iframe 内部点击验证框...")
-                        sb.switch_to_frame("iframe[src*='challenges.cloudflare.com']")
-                        sb.sleep(1)
-                        for sel in ["input[type='checkbox']", "#challenge-stage", ".ctp-checkbox-label", "span.mark", "body"]:
-                            if sb.is_element_visible(sel):
-                                sb.uc_click(sel)
-                                break
-                        sb.switch_to_default_content()
-                        sb.sleep(2)
-                except Exception as frame_e:
-                    try: sb.switch_to_default_content()
-                    except: pass
+            # 方式 2: uc_gui_handle_captcha — 另一种 GUI 交互方式
+            try:
+                logger.info(f"🛡️ [{method_label}] 尝试 uc_gui_handle_captcha()...")
+                sb.uc_gui_handle_captcha()
+                sb.sleep(3)
+                token = sb.execute_script('return (document.querySelector("input[name=\'cf-turnstile-response\']") || {}).value || "";')
+                if token and len(token) > 20:
+                    logger.info(f"✅ [{method_label}] uc_gui_handle_captcha 成功! Token 长度: {len(token)}")
+                    return True
+                logger.info(f"🛡️ [{method_label}] uc_gui_handle_captcha 后 Token 长度: {len(token)}")
+            except Exception as e:
+                logger.warning(f"⚠️ [{method_label}] uc_gui_handle_captcha 异常: {e}")
 
-            # 方式 3: 尝试 CDP 物理像素中心原点点击 iframe 元素外框
-            token = sb.execute_script('return (document.querySelector("input[name=\'cf-turnstile-response\']") || {}).value;')
-            if not token or len(token) <= 20:
+            # 方式 3: 直接 uc_click iframe 元素
+            try:
+                if sb.is_element_present("iframe[src*='challenges.cloudflare.com']"):
+                    logger.info(f"🛡️ [{method_label}] 尝试 uc_click iframe...")
+                    sb.uc_click("iframe[src*='challenges.cloudflare.com']")
+                    sb.sleep(3)
+                    token = sb.execute_script('return (document.querySelector("input[name=\'cf-turnstile-response\']") || {}).value || "";')
+                    if token and len(token) > 20:
+                        logger.info(f"✅ [{method_label}] uc_click iframe 成功! Token 长度: {len(token)}")
+                        return True
+            except Exception as e:
+                logger.warning(f"⚠️ [{method_label}] uc_click iframe 异常: {e}")
+
+            return False
+
+        # 第一次尝试求解
+        solved = try_solve_turnstile("Round-1")
+
+        # 轮询等待验证码 token 生成（最多等待 25 秒）
+        if not solved:
+            token_valid = False
+            for i in range(25):
                 try:
-                    if sb.is_element_visible("iframe[src*='challenges.cloudflare.com']"):
-                        sb.uc_click("iframe[src*='challenges.cloudflare.com']")
-                        sb.sleep(2)
+                    token = sb.execute_script('return (document.querySelector("input[name=\'cf-turnstile-response\']") || {}).value || "";')
+                    if token and len(token) > 20:
+                        logger.info(f"✅ Turnstile Token 已生成 (第 {i+1} 秒, 长度: {len(token)})")
+                        token_valid = True
+                        break
                 except:
                     pass
 
-        # 触发多阶段求解
-        try_solve_turnstile()
+                # 每 8 秒重试一次求解
+                if i in [7, 15] and not token_valid:
+                    logger.info(f"🛡️ 第 {i+1} 秒重试解封 Turnstile...")
+                    try_solve_turnstile(f"Round-{i//8+2}")
 
-        # 3. 轮询等待验证码 token 生成（最多等待 15 秒）
-        token_valid = False
-        for i in range(15):
-            try:
-                token = sb.execute_script('return (document.querySelector("input[name=\'cf-turnstile-response\']") || {}).value;')
-                if token and len(token) > 20:
-                    logger.info(f"✅ Turnstile 验证码已成功通过，获取到 Token (长度: {len(token)})！")
-                    token_valid = True
-                    break
-            except:
-                pass
-            
-            if i in [4, 9] and not token_valid:
-                logger.info(f"🛡️ 第 {i+1} 秒重试解封 Turnstile 验证码...")
-                try_solve_turnstile()
+                sb.sleep(1)
 
-            sb.sleep(1)
+            if not token_valid:
+                logger.warning("⚠️ 25 秒内未获取到 Turnstile Token，尝试直接提交...")
+        else:
+            logger.info("✅ Turnstile 已在首轮求解中通过!")
 
         # 4. 点击登录提交
         logger.info(f"📤 提交登录...")
@@ -269,7 +297,8 @@ class KataBumpRenew:
         
         sb_args = {
             "uc": True,
-            "headless": HEADLESS,
+            "xvfb": True,
+            "incognito": True,
         }
         
         if PROXY_SERVER:
