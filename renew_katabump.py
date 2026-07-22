@@ -120,12 +120,24 @@ class KataBumpRenew:
             try:
                 token = sb.execute_script('return (document.querySelector("input[name=\'cf-turnstile-response\']") || {}).value;')
                 if token and len(token) > 20:
-                    logger.info("✅ Turnstile 验证码已成功通过，获取到 Token！")
+                    logger.info(f"✅ Turnstile 验证码已成功通过，获取到 Token (长度: {len(token)})！")
                     token_valid = True
                     break
             except:
                 pass
             sb.sleep(1)
+
+        if not token_valid:
+            logger.info("🛡️ 未自动捕获到 Token，触发 uc_gui_click_captcha 界面点击协助...")
+            try:
+                sb.uc_gui_click_captcha()
+                sb.sleep(5)
+                token = sb.execute_script('return (document.querySelector("input[name=\'cf-turnstile-response\']") || {}).value;')
+                if token and len(token) > 20:
+                    logger.info(f"✅ GUI 协助求解成功，获取到 Token (长度: {len(token)})！")
+                    token_valid = True
+            except Exception as gui_err:
+                logger.warning(f"⚠️ GUI 点击破解尝试: {gui_err}")
 
         # 4. 点击登录提交
         logger.info(f"📤 提交登录...")
