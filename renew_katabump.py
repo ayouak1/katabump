@@ -88,59 +88,44 @@ class KataBumpRenew:
         # 尝试绕过 Turnstile
         logger.info(f"🛡️ 正在尝试过 Turnstile 验证码...")
         try:
-            # 1. 检查是否已经自动通过
-            token = sb.execute_script('return document.querySelector("input[name=\'cf-turnstile-response\']").value;')
-            if token and len(token) > 20:
-                logger.info("✅ Turnstile 已经自动静默通过")
-            else:
-                # 2. 尝试切换 iframe 进行精确的 CDP 点击
+            # 1. 优先尝试 SeleniumBase UC 原生过盾接口
+            sb.uc_gui_handle_captcha()
+            sb.sleep(3)
+            
+            token = sb.execute_script('return (document.querySelector("input[name=\'cf-turnstile-response\']") || {}).value;')
+            if not token or len(token) <= 20:
+                # 2. 尝试 iframe 穿透与点击
                 iframe_selector = "iframe[src*='challenges.cloudflare.com']"
-                try:
-                    sb.wait_for_element_present(iframe_selector, timeout=8)
-                    logger.info("ℹ️ 发现 Turnstile iframe，正在切换并执行 CDP 穿透点击...")
+                if sb.is_element_visible(iframe_selector):
+                    logger.info("ℹ️ 发现 Turnstile iframe，执行穿透点击...")
                     sb.driver.uc_switch_to_frame(iframe_selector)
-                    
-                    selectors = [
-                        "span.mark",
-                        ".ctp-checkbox-label",
-                        "input[type='checkbox']",
-                        "#challenge-stage",
-                        ".cb-i"
-                    ]
-                    clicked = False
-                    for sel in selectors:
-                        try:
-                            if sb.is_element_visible(sel):
-                                sb.driver.uc_click(sel)
-                                logger.info(f"✅ 成功点击 Turnstile 内层元素: {sel}")
-                                clicked = True
-                                break
-                        except:
-                            continue
-                            
-                    if not clicked:
-                        # 降级点击 body
-                        sb.driver.uc_click("body")
-                        logger.info("✅ 降级点击 Turnstile iframe body 区域")
-                        
+                    sb.driver.uc_click("body")
                     sb.switch_to_default_content()
-                except Exception as frame_err:
-                    logger.warning(f"⚠️ iframe 穿透点击失败: {frame_err}，尝试调用 solve_captcha...")
-                    try: sb.switch_to_default_content()
-                    except: pass
+                else:
                     sb.solve_captcha()
-                    logger.info("✅ Turnstile solve_captcha 解决完成")
         except Exception as e:
-            logger.warning(f"⚠️ CAPTCHA 解决尝试遇到问题: {e}")
+            logger.warning(f"⚠️ CAPTCHA 自动过盾过程提示: {e}")
 
-        # 轮询验证码 response token 是否生成 (双重确认)
-        for _ in range(15):
-            token = sb.execute_script(
-                'return document.querySelector("input[name=\'cf-turnstile-response\']").value;')
-            if token and len(token) > 20:
-                logger.info("✅ Turnstile 验证已成功通过!")
-                break
+        # 轮询等待验证码 token 生成（最多等待 25 秒）
+        token_valid = False
+        for _ in range(25):
+            try:
+                token = sb.execute_script('return (document.querySelector("input[name=\'cf-turnstile-response\']") || {}).value;')
+                if token and len(token) > 20:
+                    logger.info("✅ Turnstile 验证码已成功通过，获取到 Token！")
+                    token_valid = True
+                    break
+            except:
+                pass
             sb.sleep(1)
+
+        if not token_valid:
+            logger.warning("⚠️ 尚未捕获到有效的 Turnstile Token，尝试再次自动解算...")
+            try:
+                sb.solve_captcha()
+                sb.sleep(3)
+            except:
+                pass
 
         # 点击登录
         logger.info(f"📤 提交登录...")
