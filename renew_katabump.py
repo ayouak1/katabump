@@ -76,17 +76,79 @@ class KataBumpRenew:
         curr_url = sb.get_current_url()
         logger.info(f"📄 当前页面 Title: '{curr_title}', URL: '{curr_url}'")
 
-        # 针对 Cloudflare 未完整渲染主页面的情况，如果页面 Title 为空或包含 Cloudflare 提示，触发 UC GUI CAPTCHA 自动识别
+        # 针对 Cloudflare 盾页面
         if not curr_title or "Just a moment" in curr_title or "Cloudflare" in curr_title:
-            logger.info("🛡️ 检测到 Cloudflare 盾页面/空白遮罩，尝试 uc_gui_click_captcha 自动破解...")
+            logger.info("🛡️ 检测到 Cloudflare 盾页面，尝试 uc_gui_click_captcha...")
             try:
                 sb.uc_gui_click_captcha()
                 sb.sleep(5)
             except Exception as cf_err:
-                logger.warning(f"⚠️ uc_gui_click_captcha 尝试: {cf_err}")
+                logger.warning(f"⚠️ uc_gui_click_captcha: {cf_err}")
 
-        # 1. 优先等待并填写邮箱与密码 (使用 uc_type 发送 CDP 原生键盘事件，防止 Cloudflare 风控)
-        logger.info(f"📝 填写邮箱 (UC Native)...")
+        # ===== 深度 HTML 诊断 =====
+        try:
+            diag = sb.execute_script('''
+                var result = {};
+                // 1. 检查所有 iframe
+                var iframes = document.querySelectorAll("iframe");
+                result.iframe_count = iframes.length;
+                result.iframe_srcs = [];
+                iframes.forEach(function(f) { result.iframe_srcs.push(f.src || f.getAttribute("src") || "(empty)"); });
+                // 2. 检查 cf-turnstile 容器
+                var cfDiv = document.querySelector("div.cf-turnstile, div[data-sitekey], div.turnstile-wrapper, [data-turnstile-sitekey]");
+                result.cf_div_exists = !!cfDiv;
+                result.cf_div_html = cfDiv ? cfDiv.outerHTML.substring(0, 300) : "(none)";
+                // 3. 检查 cf-turnstile-response input
+                var cfInput = document.querySelector("input[name='cf-turnstile-response']");
+                result.cf_input_exists = !!cfInput;
+                result.cf_input_value_len = cfInput ? (cfInput.value || "").length : -1;
+                // 4. 检查 turnstile 相关 script 标签
+                var scripts = document.querySelectorAll("script[src*='turnstile'], script[src*='challenges.cloudflare']");
+                result.turnstile_scripts = [];
+                scripts.forEach(function(s) { result.turnstile_scripts.push(s.src); });
+                // 5. 检查 window.turnstile
+                result.window_turnstile = typeof window.turnstile;
+                // 6. 检查所有 hidden inputs
+                var hiddens = document.querySelectorAll("input[type='hidden']");
+                result.hidden_inputs = [];
+                hiddens.forEach(function(h) { result.hidden_inputs.push(h.name + "=" + (h.value || "").substring(0, 30)); });
+                return JSON.stringify(result);
+            ''')
+            logger.info(f"🔍 HTML 诊断: {diag}")
+        except Exception as diag_err:
+            logger.warning(f"⚠️ HTML 诊断失败: {diag_err}")
+
+        # ===== 等待 Turnstile 控件渲染（最多 10 秒）=====
+        logger.info("🛡️ 等待 Turnstile 控件渲染...")
+        for wait_i in range(10):
+            try:
+                has_widget = sb.execute_script('''
+                    var cf = document.querySelector("input[name='cf-turnstile-response']");
+                    if (cf && cf.value && cf.value.length > 20) return "solved";
+                    var iframe = document.querySelector("iframe[src*='challenges.cloudflare.com']");
+                    if (iframe) return "iframe_present";
+                    var div = document.querySelector("div.cf-turnstile, div[data-sitekey]");
+                    if (div) return "div_present";
+                    return "none";
+                ''')
+                logger.info(f"🛡️ Turnstile 状态 (第{wait_i+1}秒): {has_widget}")
+                if has_widget == "solved":
+                    logger.info("✅ Turnstile 已自动求解!")
+                    break
+                if has_widget in ("iframe_present", "div_present"):
+                    # 控件已渲染，尝试点击
+                    try:
+                        sb.uc_gui_click_captcha()
+                        sb.sleep(2)
+                    except:
+                        pass
+                    break
+            except:
+                pass
+            sb.sleep(1)
+
+        # 1. 等待并填写邮箱与密码
+        logger.info(f"📝 填写邮箱...")
         try:
             sb.wait_for_element_visible("input#email", timeout=25)
         except Exception as wait_err:
@@ -105,20 +167,13 @@ class KataBumpRenew:
         sb.press_keys("input#password", self.password)
         sb.sleep(1)
 
-        # 2. 尝试多重深度辅助过 Turnstile 验证码
+        # 2. 尝试过 Turnstile 验证码
         logger.info(f"🛡️ 正在尝试过 Turnstile 验证码...")
 
-        # 检查 Turnstile iframe 是否存在
-        try:
-            has_iframe = sb.is_element_present("iframe[src*='challenges.cloudflare.com']")
-            logger.info(f"🛡️ Turnstile iframe 存在: {has_iframe}")
-        except:
-            has_iframe = False
-
-        # 检查初始 token 状态
+        # 再次诊断当前状态
         try:
             init_token = sb.execute_script('return (document.querySelector("input[name=\'cf-turnstile-response\']") || {}).value || "";')
-            logger.info(f"🛡️ 初始 Token 长度: {len(init_token)}")
+            logger.info(f"🛡️ 当前 Token 长度: {len(init_token)}")
         except:
             init_token = ""
 
