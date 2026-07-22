@@ -19,11 +19,8 @@ ACCOUNTS_ENV = os.getenv('USERS_JSON', os.getenv('ACCOUNTS', ''))
 TG_BOT_TOKEN = os.getenv('TG_BOT_TOKEN', os.getenv('BOT_TOKEN', ''))
 TG_CHAT_ID = os.getenv('TG_CHAT_ID', os.getenv('CHAT_ID', ''))
 
-# GHA 环境判定：如果在 GitHub Actions 中运行，忽略代理使用 Azure 优质高信誉原生 IP 绕过 CF 验证
-IS_GHA = os.getenv('GITHUB_ACTIONS') == 'true'
+# 支持全局 HTTP/HTTPS 代理
 PROXY_SERVER = os.getenv('HTTP_PROXY', os.getenv('HTTPS_PROXY', ''))
-if IS_GHA:
-    PROXY_SERVER = ''
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)

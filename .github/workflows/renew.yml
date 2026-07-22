@@ -13,11 +13,6 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - name: Setup Cloudflare WARP (解决 GHA Azure 机房 IP 被 CF 拦截问题)
-      uses: fscarmen/warp-on-actions@v1.3
-      with:
-        mode: global
-
     - name: Set up Python 3.10
       uses: actions/setup-python@v5
       with:
@@ -42,6 +37,8 @@ jobs:
       env:
         USERS_JSON: ${{ secrets.USERS_JSON }}
         ACCOUNTS: ${{ secrets.ACCOUNTS }}
+        HTTP_PROXY: ${{ secrets.HTTP_PROXY }}
+        HTTPS_PROXY: ${{ secrets.HTTP_PROXY }}
         TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
         TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
         HEADLESS: 'false'
