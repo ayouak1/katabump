@@ -223,15 +223,28 @@ class KataBumpRenew:
         max_retries = 3
         last_error = ""
         
-        # 使用 SeleniumBase SB 上下文管理器
         sb_args = {
             "uc": True,
             "headless": HEADLESS,
         }
+        
+        # 检验代理有效性，如果代理不可用自动降级直连
+        active_proxy = None
         if PROXY_SERVER:
-            # SeleniumBase 支持直接传递代理参数，格式 --proxy=user:pass@host:port
             proxy_clean = PROXY_SERVER.replace("http://", "").replace("https://", "")
-            sb_args["proxy"] = proxy_clean
+            try:
+                logger.info(f"🌐 正在测试代理连通性: {proxy_clean}")
+                test_res = requests.get("https://httpbin.org/ip", proxies={"http": PROXY_SERVER, "https": PROXY_SERVER}, timeout=5)
+                if test_res.status_code == 200:
+                    logger.info(f"✅ 代理测试通过，使用代理出口 IP: {test_res.json().get('origin')}")
+                    active_proxy = proxy_clean
+                else:
+                    logger.warning(f"⚠️ 代理返回异常状态码 {test_res.status_code}，降级为直连模式")
+            except Exception as pe:
+                logger.warning(f"⚠️ 代理连通性测试失败 ({pe})，降级为直连模式运行")
+
+        if active_proxy:
+            sb_args["proxy"] = active_proxy
 
         for attempt in range(max_retries):
             with SB(**sb_args) as sb:
