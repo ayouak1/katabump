@@ -177,23 +177,47 @@ class KataBumpRenew:
             except:
                 return ""
 
-        # 尝试标准 SeleniumBase CAPTCHA 自动处理
+        # 方式 1: 直接对 div.cf-turnstile 容器以及内部 iframe 进行 CDP 物理原生点击
+        if not check_token():
+            for selector in ["div.cf-turnstile iframe", "div.cf-turnstile", "div[data-sitekey]", "iframe"]:
+                try:
+                    if sb.is_element_present(selector):
+                        logger.info(f"🛡️ 尝试原生 CDP 点击: {selector}")
+                        sb.uc_click(selector)
+                        sb.sleep(2)
+                        if check_token():
+                            break
+                except Exception as click_err:
+                    logger.warning(f"⚠️ 点击 {selector} 失败: {click_err}")
+
+        # 方式 2: 如果还没 token，切入 div.cf-turnstile iframe 内部点击
+        if not check_token():
+            try:
+                if sb.is_element_present("div.cf-turnstile iframe"):
+                    logger.info("🛡️ 切入 div.cf-turnstile iframe 内部点击...")
+                    sb.switch_to_frame("div.cf-turnstile iframe")
+                    sb.sleep(1)
+                    for inner_sel in ["input[type='checkbox']", "#challenge-stage", ".ctp-checkbox-label", "body"]:
+                        try:
+                            if sb.is_element_present(inner_sel):
+                                sb.uc_click(inner_sel)
+                                break
+                        except:
+                            pass
+                    sb.switch_to_default_content()
+                    sb.sleep(2)
+            except Exception as frame_err:
+                logger.warning(f"⚠️ 切换 iframe 尝试异常: {frame_err}")
+                try: sb.switch_to_default_content()
+                except: pass
+
+        # 方式 3: SeleniumBase 官方 GUI 处理器兜底
         if not check_token():
             try:
                 logger.info("🛡️ 执行 uc_gui_handle_captcha()...")
                 sb.uc_gui_handle_captcha()
-                sb.sleep(3)
-            except Exception as e:
-                logger.warning(f"⚠️ uc_gui_handle_captcha 异常: {e}")
-
-        # 若仍未获取到 Token，使用真实坐标/iframe 点击复选框
-        if not check_token():
-            try:
-                logger.info("🛡️ 尝试通过 uc_gui_click_captcha()...")
-                sb.uc_gui_click_captcha()
-                sb.sleep(3)
-            except Exception as e:
-                logger.warning(f"⚠️ uc_gui_click_captcha 异常: {e}")
+                sb.sleep(2)
+            except: pass
 
         # 轮询检查 Token 结果 (最多等待 15 秒)
         token_valid = False
