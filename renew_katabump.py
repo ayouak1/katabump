@@ -108,11 +108,33 @@ class KataBumpRenew:
         # 2. 尝试辅助过 Turnstile 验证码
         logger.info(f"🛡️ 正在尝试过 Turnstile 验证码...")
         try:
+            # 策略 A: 尝试多重 selector 直接 uc_click
             if sb.is_element_visible("div.cf-turnstile"):
                 sb.uc_click("div.cf-turnstile")
-                sb.sleep(3)
+                sb.sleep(2)
         except Exception as e:
-            logger.warning(f"⚠️ uc_click div.cf-turnstile 尝试: {e}")
+            logger.warning(f"⚠️ uc_click div.cf-turnstile: {e}")
+
+        try:
+            # 策略 B: 切换到 Turnstile iframe 内部点击人机验证复选框
+            if sb.is_element_present("iframe[src*='challenges.cloudflare.com']"):
+                logger.info("🛡️ 切入 Cloudflare Turnstile iframe 内部...")
+                sb.switch_to_frame("iframe[src*='challenges.cloudflare.com']")
+                sb.sleep(1)
+                if sb.is_element_present("input[type='checkbox']"):
+                    sb.uc_click("input[type='checkbox']")
+                elif sb.is_element_present("#challenge-stage"):
+                    sb.uc_click("#challenge-stage")
+                elif sb.is_element_present("span.mark"):
+                    sb.uc_click("span.mark")
+                sb.sleep(2)
+                sb.switch_to_default_content()
+        except Exception as iframe_err:
+            logger.warning(f"⚠️ Turnstile iframe 点击: {iframe_err}")
+            try:
+                sb.switch_to_default_content()
+            except:
+                pass
 
         # 3. 轮询等待验证码 token 生成（最多等待 20 秒）
         token_valid = False
@@ -128,9 +150,9 @@ class KataBumpRenew:
             sb.sleep(1)
 
         if not token_valid:
-            logger.info("🛡️ 未自动捕获到 Token，触发 uc_gui_click_captcha 界面点击协助...")
+            logger.info("🛡️ 未自动捕获到 Token，触发 uc_gui_handle_captcha 协助解封...")
             try:
-                sb.uc_gui_click_captcha()
+                sb.uc_gui_handle_captcha()
                 sb.sleep(5)
                 token = sb.execute_script('return (document.querySelector("input[name=\'cf-turnstile-response\']") || {}).value;')
                 if token and len(token) > 20:
