@@ -72,20 +72,13 @@ class KataBumpRenew:
         sb.uc_open_with_reconnect("https://dashboard.katabump.com/auth/login", 6)
         sb.sleep(3)
 
-        # 1. 先尝试绕过 Turnstile 并等待 Token 生成
+        # 1. 尝试辅助过 Turnstile 验证码
         logger.info(f"🛡️ 正在尝试过 Turnstile 验证码...")
         try:
-            # 原生自动求解
-            sb.click_captcha()
+            sb.uc_click("div.cf-turnstile")
             sb.sleep(3)
         except Exception as e:
-            logger.warning(f"⚠️ 原生 click_captcha 尝试: {e}")
-
-        try:
-            sb.uc_click("div.cf-turnstile")
-            sb.sleep(2)
-        except Exception as e:
-            logger.warning(f"⚠️ uc_click 父级容器尝试: {e}")
+            logger.warning(f"⚠️ uc_click div.cf-turnstile 尝试: {e}")
 
         # 2. 轮询等待验证码 token 生成（最多等待 25 秒）
         token_valid = False
@@ -228,33 +221,11 @@ class KataBumpRenew:
             "headless": HEADLESS,
         }
         
-        # 检验代理有效性，如果代理不可用自动降级直连
-        active_proxy = None
         if PROXY_SERVER:
             proxy_clean = PROXY_SERVER.replace("http://", "").replace("https://", "")
-            try:
-                logger.info(f"🌐 正在测试代理连通性: {proxy_clean}")
-                test_res = requests.get("https://api.ipify.org?format=json", proxies={"http": PROXY_SERVER, "https": PROXY_SERVER}, timeout=8)
-                if test_res.status_code == 200:
-                    origin_ip = test_res.json().get('ip', 'Unknown')
-                    logger.info(f"✅ 代理测试成功！VPS 出口 IP: {origin_ip}")
-                    active_proxy = proxy_clean
-                else:
-                    logger.warning(f"⚠️ 代理返回异常状态码 {test_res.status_code}，降级为直连模式")
-            except Exception as pe:
-                logger.warning(f"⚠️ 代理连通性测试失败 ({pe})，降级为直连模式运行")
-
-        if active_proxy:
-            sb_args["proxy"] = active_proxy
-            # 即使使用代理，也必须保证 127.0.0.1/localhost 不走代理，防止 ChromeDriver 握手报 Service Unavailable
+            sb_args["proxy"] = proxy_clean
+            # 保证 127.0.0.1/localhost 不走代理，防止 Selenium 本地与 ChromeDriver 通信报 Service Unavailable
             os.environ['NO_PROXY'] = 'localhost,127.0.0.1,127.0.0.0/8,::1'
-        else:
-            # 彻底清除环境变量中的代理，防止 Selenium 本地与 ChromeDriver 通信被污染
-            os.environ.pop('HTTP_PROXY', None)
-            os.environ.pop('HTTPS_PROXY', None)
-            os.environ.pop('http_proxy', None)
-            os.environ.pop('https_proxy', None)
-            os.environ['NO_PROXY'] = '*'
 
         for attempt in range(max_retries):
             with SB(**sb_args) as sb:
