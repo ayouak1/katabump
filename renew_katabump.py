@@ -108,37 +108,19 @@ class KataBumpRenew:
         # 2. 尝试辅助过 Turnstile 验证码
         logger.info(f"🛡️ 正在尝试过 Turnstile 验证码...")
         try:
-            # 策略 A: 尝试多重 selector 直接 uc_click
-            if sb.is_element_visible("div.cf-turnstile"):
+            if sb.is_element_visible("iframe[src*='challenges.cloudflare.com']"):
+                logger.info("🛡️ 执行 CDP 原生点击 Turnstile iframe 像素中心...")
+                sb.uc_click("iframe[src*='challenges.cloudflare.com']")
+                sb.sleep(3)
+            elif sb.is_element_visible("div.cf-turnstile"):
                 sb.uc_click("div.cf-turnstile")
-                sb.sleep(2)
+                sb.sleep(3)
         except Exception as e:
-            logger.warning(f"⚠️ uc_click div.cf-turnstile: {e}")
+            logger.warning(f"⚠️ uc_click iframe: {e}")
 
-        try:
-            # 策略 B: 切换到 Turnstile iframe 内部点击人机验证复选框
-            if sb.is_element_present("iframe[src*='challenges.cloudflare.com']"):
-                logger.info("🛡️ 切入 Cloudflare Turnstile iframe 内部...")
-                sb.switch_to_frame("iframe[src*='challenges.cloudflare.com']")
-                sb.sleep(1)
-                if sb.is_element_present("input[type='checkbox']"):
-                    sb.uc_click("input[type='checkbox']")
-                elif sb.is_element_present("#challenge-stage"):
-                    sb.uc_click("#challenge-stage")
-                elif sb.is_element_present("span.mark"):
-                    sb.uc_click("span.mark")
-                sb.sleep(2)
-                sb.switch_to_default_content()
-        except Exception as iframe_err:
-            logger.warning(f"⚠️ Turnstile iframe 点击: {iframe_err}")
-            try:
-                sb.switch_to_default_content()
-            except:
-                pass
-
-        # 3. 轮询等待验证码 token 生成（最多等待 20 秒）
+        # 3. 轮询等待验证码 token 生成（最多等待 15 秒）
         token_valid = False
-        for _ in range(20):
+        for i in range(15):
             try:
                 token = sb.execute_script('return (document.querySelector("input[name=\'cf-turnstile-response\']") || {}).value;')
                 if token and len(token) > 20:
@@ -147,6 +129,15 @@ class KataBumpRenew:
                     break
             except:
                 pass
+            
+            # 每隔 5 秒重新尝试点击一次 iframe 中心
+            if i in [4, 9] and not token_valid:
+                try:
+                    logger.info("🛡️ 重新触发 CDP 点击 Turnstile iframe...")
+                    if sb.is_element_visible("iframe[src*='challenges.cloudflare.com']"):
+                        sb.uc_click("iframe[src*='challenges.cloudflare.com']")
+                except:
+                    pass
             sb.sleep(1)
 
         if not token_valid:
