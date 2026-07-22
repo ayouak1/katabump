@@ -85,8 +85,8 @@ class KataBumpRenew:
             except Exception as cf_err:
                 logger.warning(f"⚠️ uc_gui_click_captcha 尝试: {cf_err}")
 
-        # 1. 优先等待并填写邮箱与密码
-        logger.info(f"📝 填写邮箱...")
+        # 1. 优先等待并填写邮箱与密码 (使用 uc_type 发送 CDP 原生键盘事件，防止 Cloudflare 风控)
+        logger.info(f"📝 填写邮箱 (UC Native)...")
         try:
             sb.wait_for_element_visible("input#email", timeout=25)
         except Exception as wait_err:
@@ -98,18 +98,18 @@ class KataBumpRenew:
                 pass
             raise wait_err
 
-        sb.type("input#email", self.user)
+        sb.uc_type("input#email", self.user)
         sb.sleep(1)
 
-        logger.info(f"🔒 填写密码...")
-        sb.type("input#password", self.password)
+        logger.info(f"🔒 填写密码 (UC Native)...")
+        sb.uc_type("input#password", self.password)
         sb.sleep(1)
 
         # 2. 尝试多重深度辅助过 Turnstile 验证码
         logger.info(f"🛡️ 正在尝试过 Turnstile 验证码...")
         
         def try_solve_turnstile():
-            # 方式 1: 直接使用 SeleniumBase 专用 GUI Captcha 模拟真实鼠标解封
+            # 方式 1: 使用 SeleniumBase 专用 GUI Captcha 模拟真实鼠标解封
             try:
                 sb.uc_gui_click_captcha()
                 sb.sleep(2)
