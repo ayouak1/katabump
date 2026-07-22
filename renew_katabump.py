@@ -78,29 +78,17 @@ class KataBumpRenew:
         # 1. 先尝试绕过 Turnstile 并等待 Token 生成
         logger.info(f"🛡️ 正在尝试过 Turnstile 验证码...")
         try:
-            # 尝试高级 GUI 辅助
-            if hasattr(sb, 'uc_gui_handle_captcha'):
-                sb.uc_gui_handle_captcha()
-            
-            # 尝试 iframe 穿透与物理级点击
-            iframe_selector = "iframe[src*='challenges.cloudflare.com']"
-            if sb.is_element_visible(iframe_selector):
-                logger.info("ℹ️ 发现 Turnstile iframe，执行穿透点击...")
-                sb.driver.uc_switch_to_frame(iframe_selector)
-                
-                # 优先寻找复选框元素
-                selectors = ["span.mark", ".ctp-checkbox-label", "input[type='checkbox']", "#challenge-stage", "body"]
-                for sel in selectors:
-                    try:
-                        if sb.is_element_visible(sel):
-                            sb.driver.uc_click(sel)
-                            logger.info(f"✅ 点击 Turnstile 元素: {sel}")
-                            break
-                    except:
-                        continue
-                sb.switch_to_default_content()
+            # 使用 SeleniumBase 专用于 Cloudflare Turnstile 的 GUI 点击接口
+            sb.uc_gui_click_cf()
+            sb.sleep(3)
         except Exception as e:
-            logger.warning(f"⚠️ 自动过盾尝试: {e}")
+            logger.warning(f"⚠️ uc_gui_click_cf 尝试: {e}")
+
+        try:
+            sb.uc_gui_handle_cf()
+            sb.sleep(3)
+        except Exception as e:
+            logger.warning(f"⚠️ uc_gui_handle_cf 尝试: {e}")
 
         # 2. 轮询等待验证码 token 生成（最多等待 25 秒）
         token_valid = False
