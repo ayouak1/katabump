@@ -76,22 +76,24 @@ class KataBumpRenew:
         curr_url = sb.get_current_url()
         logger.info(f"📄 当前页面 Title: '{curr_title}', URL: '{curr_url}'")
 
-        # 处理 Cloudflare "Just a moment..." 五秒盾/人机验证中间页
-        if "Just a moment" in curr_title or "Cloudflare" in curr_title or "Attention Required" in curr_title:
-            logger.info("🛡️ 检测到 Cloudflare 拦截中间页，等待自动或重连解封...")
-            sb.uc_open_with_reconnect("https://dashboard.katabump.com/auth/login", 10)
-            sb.sleep(5)
-            logger.info(f"📄 解封后页面 Title: '{sb.get_title()}', URL: '{sb.get_current_url()}'")
+        # 针对 Cloudflare 未完整渲染主页面的情况，如果页面 Title 为空或包含 Cloudflare 提示，触发 UC GUI CAPTCHA 自动识别
+        if not curr_title or "Just a moment" in curr_title or "Cloudflare" in curr_title:
+            logger.info("🛡️ 检测到 Cloudflare 盾页面/空白遮罩，尝试 uc_gui_click_captcha 自动破解...")
+            try:
+                sb.uc_gui_click_captcha()
+                sb.sleep(5)
+            except Exception as cf_err:
+                logger.warning(f"⚠️ uc_gui_click_captcha 尝试: {cf_err}")
 
         # 1. 优先等待并填写邮箱与密码
         logger.info(f"📝 填写邮箱...")
         try:
-            sb.wait_for_element("input#email", timeout=20)
+            sb.wait_for_element_visible("input#email", timeout=25)
         except Exception as wait_err:
             logger.error(f"❌ 页面未出现 input#email！当前 Title: '{sb.get_title()}', URL: '{sb.get_current_url()}'")
             try:
-                body_snippet = sb.get_text("body")[:300]
-                logger.error(f"❌ 页面内容摘要: {body_snippet}")
+                page_source_snippet = sb.get_page_source()[:500]
+                logger.error(f"❌ HTML 源码前500字符: {page_source_snippet}")
             except:
                 pass
             raise wait_err
