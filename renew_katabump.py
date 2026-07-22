@@ -98,11 +98,11 @@ class KataBumpRenew:
                 pass
             raise wait_err
 
-        sb.slow_type("input#email", self.user)
+        sb.press_keys("input#email", self.user)
         sb.sleep(1)
 
         logger.info(f"🔒 填写密码...")
-        sb.slow_type("input#password", self.password)
+        sb.press_keys("input#password", self.password)
         sb.sleep(1)
 
         # 2. 尝试多重深度辅助过 Turnstile 验证码
