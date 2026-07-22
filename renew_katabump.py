@@ -72,17 +72,27 @@ class KataBumpRenew:
         sb.uc_open_with_reconnect("https://dashboard.katabump.com/auth/login", 6)
         sb.sleep(3)
 
-        # 1. 尝试辅助过 Turnstile 验证码
+        # 1. 优先填写邮箱与密码（输入框直接在主文档中）
+        logger.info(f"📝 填写邮箱...")
+        sb.type("input#email", self.user)
+        sb.sleep(1)
+
+        logger.info(f"🔒 填写密码...")
+        sb.type("input#password", self.password)
+        sb.sleep(1)
+
+        # 2. 尝试辅助过 Turnstile 验证码
         logger.info(f"🛡️ 正在尝试过 Turnstile 验证码...")
         try:
-            sb.uc_click("div.cf-turnstile")
-            sb.sleep(3)
+            if sb.is_element_visible("div.cf-turnstile"):
+                sb.uc_click("div.cf-turnstile")
+                sb.sleep(3)
         except Exception as e:
             logger.warning(f"⚠️ uc_click div.cf-turnstile 尝试: {e}")
 
-        # 2. 轮询等待验证码 token 生成（最多等待 25 秒）
+        # 3. 轮询等待验证码 token 生成（最多等待 20 秒）
         token_valid = False
-        for _ in range(25):
+        for _ in range(20):
             try:
                 token = sb.execute_script('return (document.querySelector("input[name=\'cf-turnstile-response\']") || {}).value;')
                 if token and len(token) > 20:
@@ -92,27 +102,6 @@ class KataBumpRenew:
             except:
                 pass
             sb.sleep(1)
-
-        if not token_valid:
-            logger.warning("⚠️ 尚未捕获到有效的 Turnstile Token，尝试再次 uc_click 辅助点击...")
-            try:
-                iframe_selector = "iframe[src*='challenges.cloudflare.com']"
-                if sb.is_element_visible(iframe_selector):
-                    sb.driver.uc_switch_to_frame(iframe_selector)
-                    sb.driver.uc_click("body")
-                    sb.switch_to_default_content()
-                    sb.sleep(3)
-            except:
-                pass
-
-        # 3. 验证码解决后，再填写邮箱与密码
-        logger.info(f"📝 填写邮箱...")
-        sb.type("input#email", self.user)
-        sb.sleep(1)
-
-        logger.info(f"🔒 填写密码...")
-        sb.type("input#password", self.password)
-        sb.sleep(1)
 
         # 4. 点击登录提交
         logger.info(f"📤 提交登录...")
