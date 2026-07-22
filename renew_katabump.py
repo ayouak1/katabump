@@ -118,6 +118,30 @@ class KataBumpRenew:
         except Exception as diag_err:
             logger.warning(f"⚠️ HTML 诊断失败: {diag_err}")
 
+        # ===== 强制修复 Turnstile 容器尺寸并触发渲染 =====
+        try:
+            sb.execute_script('''
+                var div = document.querySelector("div.cf-turnstile, div[data-sitekey]");
+                if (div) {
+                    div.style.width = "300px";
+                    div.style.height = "65px";
+                    div.style.minWidth = "300px";
+                    div.style.minHeight = "65px";
+                    div.style.display = "block";
+                    div.setAttribute("data-size", "normal");
+                    if (window.turnstile && typeof window.turnstile.render === "function") {
+                        try {
+                            window.turnstile.render(div, {
+                                sitekey: div.getAttribute("data-sitekey") || "0x4AAAAAAA1IssKDXD0TRMjP"
+                            });
+                        } catch(e) {}
+                    }
+                }
+            ''')
+            sb.sleep(2)
+        except Exception as style_err:
+            logger.warning(f"⚠️ 容器样式设置异常: {style_err}")
+
         # ===== 等待 Turnstile 控件渲染（最多 10 秒）=====
         logger.info("🛡️ 等待 Turnstile 控件渲染...")
         for wait_i in range(10):
@@ -126,7 +150,7 @@ class KataBumpRenew:
                     var cf = document.querySelector("input[name='cf-turnstile-response']");
                     if (cf && cf.value && cf.value.length > 20) return "solved";
                     var iframe = document.querySelector("iframe[src*='challenges.cloudflare.com']");
-                    if (iframe) return "iframe_present";
+                    if (iframe && iframe.src) return "iframe_present";
                     var div = document.querySelector("div.cf-turnstile, div[data-sitekey]");
                     if (div) return "div_present";
                     return "none";
@@ -136,7 +160,6 @@ class KataBumpRenew:
                     logger.info("✅ Turnstile 已自动求解!")
                     break
                 if has_widget in ("iframe_present", "div_present"):
-                    # 控件已渲染，尝试点击
                     try:
                         sb.uc_gui_click_captcha()
                         sb.sleep(2)
@@ -338,6 +361,7 @@ class KataBumpRenew:
             "uc": True,
             "xvfb": True,
             "incognito": True,
+            "window_size": (1920, 1080),
             "agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
         }
         
