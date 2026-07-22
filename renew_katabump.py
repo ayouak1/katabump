@@ -72,41 +72,18 @@ class KataBumpRenew:
     def process(self, sb):
         """主续期流程"""
         logger.info(f"🚀 访问登录页: {self.masked}")
-        sb.activate_cdp_mode("https://dashboard.katabump.com/auth/login")
-        sb.sleep(5)
+        sb.uc_open_with_reconnect("https://dashboard.katabump.com/auth/login", 6)
+        sb.sleep(3)
 
-        # 输入邮箱
-        logger.info(f"📝 填写邮箱...")
-        sb.type("input#email", self.user)
-        sb.sleep(1.5)
-
-        # 输入密码
-        logger.info(f"🔒 填写密码...")
-        sb.type("input#password", self.password)
-        sb.sleep(1.5)
-
-        # 尝试绕过 Turnstile
+        # 1. 先尝试绕过 Turnstile 并等待 Token 生成
         logger.info(f"🛡️ 正在尝试过 Turnstile 验证码...")
         try:
-            # 1. 优先尝试 SeleniumBase UC 原生过盾接口
-            sb.uc_gui_handle_captcha()
+            sb.solve_captcha()
             sb.sleep(3)
-            
-            token = sb.execute_script('return (document.querySelector("input[name=\'cf-turnstile-response\']") || {}).value;')
-            if not token or len(token) <= 20:
-                # 2. 尝试 iframe 穿透与点击
-                iframe_selector = "iframe[src*='challenges.cloudflare.com']"
-                if sb.is_element_visible(iframe_selector):
-                    logger.info("ℹ️ 发现 Turnstile iframe，执行穿透点击...")
-                    sb.driver.uc_switch_to_frame(iframe_selector)
-                    sb.driver.uc_click("body")
-                    sb.switch_to_default_content()
-                else:
-                    sb.solve_captcha()
         except Exception as e:
-            logger.warning(f"⚠️ CAPTCHA 自动过盾过程提示: {e}")
+            logger.warning(f"⚠️ 自动 solve_captcha 尝试: {e}")
 
-        # 轮询等待验证码 token 生成（最多等待 25 秒）
+        # 2. 轮询等待验证码 token 生成（最多等待 25 秒）
         token_valid = False
         for _ in range(25):
             try:
@@ -120,17 +97,30 @@ class KataBumpRenew:
             sb.sleep(1)
 
         if not token_valid:
-            logger.warning("⚠️ 尚未捕获到有效的 Turnstile Token，尝试再次自动解算...")
+            logger.warning("⚠️ 尚未捕获到有效的 Turnstile Token，尝试再次 uc_click 辅助点击...")
             try:
-                sb.solve_captcha()
-                sb.sleep(3)
+                iframe_selector = "iframe[src*='challenges.cloudflare.com']"
+                if sb.is_element_visible(iframe_selector):
+                    sb.driver.uc_switch_to_frame(iframe_selector)
+                    sb.driver.uc_click("body")
+                    sb.switch_to_default_content()
+                    sb.sleep(3)
             except:
                 pass
 
-        # 点击登录
+        # 3. 验证码解决后，再填写邮箱与密码
+        logger.info(f"📝 填写邮箱...")
+        sb.type("input#email", self.user)
+        sb.sleep(1)
+
+        logger.info(f"🔒 填写密码...")
+        sb.type("input#password", self.password)
+        sb.sleep(1)
+
+        # 4. 点击登录提交
         logger.info(f"📤 提交登录...")
         try:
-            sb.click('button[type="submit"]')
+            sb.uc_click('button[type="submit"]')
         except Exception as e:
             logger.warning(f"正常点击提交被拦截，尝试 JS 强制点击: {e}")
             sb.execute_script('document.querySelector("button[type=\'submit\']").click();')
