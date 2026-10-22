@@ -1,0 +1,52 @@
+name: Katabump Renew (Windows runner experiment)
+
+# 实验：在 GitHub 托管的 Windows 运行器（真实桌面 + 真实 Windows 指纹）上登录，
+# 验证 Turnstile 是否因 Linux/Xvfb 指纹被拦。仅手动触发，不影响主定时任务。
+on:
+  workflow_dispatch:
+    inputs:
+      use_proxy:
+        description: '是否走 HTTP_PROXY Secret (true/false)'
+        default: 'false'
+
+permissions:
+  contents: read
+
+jobs:
+  renew:
+    runs-on: windows-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    - name: Install Python Dependencies
+      shell: pwsh
+      run: |
+        python -m pip install --upgrade pip
+        pip install pyautogui Pillow
+        pip install -r requirements.txt
+        seleniumbase install chromedriver
+
+    - name: Run Auto Renew Script
+      shell: pwsh
+      env:
+        PYTHONIOENCODING: utf-8
+        USERS_JSON: ${{ secrets.USERS_JSON }}
+        TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+        TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+        PROXY_SECRET: ${{ secrets.HTTP_PROXY }}
+        USE_PROXY: ${{ github.event.inputs.use_proxy }}
+      run: |
+        if ($env:USE_PROXY -eq 'true') { $env:HTTP_PROXY = $env:PROXY_SECRET; $env:HTTPS_PROXY = $env:PROXY_SECRET }
+        python renew_katabump.py
+
+    - name: Upload Screenshots
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: screenshots-windows
+        path: screenshots/

@@ -173,6 +173,7 @@ class KataBumpRenew:
             # 尝试 PyAutoGUI 真实物理点击
             try:
                 import pyautogui
+                pyautogui.FAILSAFE = False
                 coords = sb.execute_script('''
                     var el = document.querySelector("div.cf-turnstile, iframe[src*='challenges'], div[data-sitekey]");
                     if (!el) return null;
