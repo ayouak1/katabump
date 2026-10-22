@@ -6,12 +6,25 @@ on:
     - cron: '0 0 * * *'
   workflow_dispatch: # 允许手动触发
 
+permissions:
+  contents: read
+  actions: write # 用于自我续命，防止 60 天无活动被 GitHub 停用定时任务
+
 jobs:
   renew:
     runs-on: ubuntu-latest
     
     steps:
     - uses: actions/checkout@v4
+
+    # 恢复上次运行刷新过的登录会话（滚动续命，免登录页 Turnstile）
+    - name: Restore session cache
+      uses: actions/cache/restore@v4
+      with:
+        path: session_cookies.json
+        key: katabump-session-${{ github.run_id }}
+        restore-keys: |
+          katabump-session-
 
     - name: Set up Python 3.10
       uses: actions/setup-python@v5
@@ -38,6 +51,7 @@ jobs:
       env:
         USERS_JSON: ${{ secrets.USERS_JSON }}
         ACCOUNTS: ${{ secrets.ACCOUNTS }}
+        SESSION_COOKIES: ${{ secrets.SESSION_COOKIES }}
         HTTP_PROXY: ${{ secrets.HTTP_PROXY }}
         HTTPS_PROXY: ${{ secrets.HTTP_PROXY }}
         TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
@@ -45,9 +59,24 @@ jobs:
       run: |
         python renew_katabump.py
 
+    # 无论成败都保存最新会话，供下次运行使用
+    - name: Save session cache
+      if: always()
+      uses: actions/cache/save@v4
+      with:
+        path: session_cookies.json
+        key: katabump-session-${{ github.run_id }}
+
     - name: Upload Screenshots
       if: always()
       uses: actions/upload-artifact@v4
       with:
         name: screenshots
         path: screenshots/
+
+    # 防止仓库长期无提交导致定时任务被 GitHub 自动停用（60 天规则）
+    - name: Keep workflow alive
+      if: always()
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: gh workflow enable "Katabump Auto Renew" --repo "$GITHUB_REPOSITORY" || true

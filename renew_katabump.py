@@ -21,6 +21,7 @@ TG_CHAT_ID = os.getenv('TG_CHAT_ID', os.getenv('CHAT_ID', ''))
 
 # 支持全局 HTTP/HTTPS 代理
 PROXY_SERVER = os.getenv('HTTP_PROXY', os.getenv('HTTPS_PROXY', ''))
+SESSION_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'session_cookies.json')
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -66,8 +67,78 @@ class KataBumpRenew:
         self.masked = mask_email(user)
         self.screenshot_path = None
 
-    def process(self, sb):
-        """主续期流程"""
+    def load_saved_cookies(self):
+        """优先读取缓存文件（上次运行刷新过的），其次读取 Secret 环境变量"""
+        raw = ""
+        if os.path.exists(SESSION_FILE):
+            try:
+                with open(SESSION_FILE, 'r', encoding='utf-8') as f:
+                    raw = f.read()
+                logger.info(f"🍪 读取到缓存会话文件 {SESSION_FILE}")
+            except Exception:
+                raw = ""
+        if not raw.strip():
+            raw = os.getenv('SESSION_COOKIES', '')
+            if raw.strip():
+                logger.info("🍪 读取到 SESSION_COOKIES Secret")
+        try:
+            data = json.loads(raw) if raw.strip() else []
+            return data if isinstance(data, list) else []
+        except Exception as e:
+            logger.warning(f"⚠️ 会话 Cookie 解析失败: {e}")
+            return []
+
+    def restore_session(self, sb):
+        """尝试用已保存的 Cookie 直接进入后台，成功则可跳过带 Turnstile 的登录页"""
+        cookies = self.load_saved_cookies()
+        if not cookies:
+            logger.info("🍪 没有可用的已保存会话，将走正常登录")
+            return False
+        try:
+            sb.uc_open_with_reconnect("https://dashboard.katabump.com/auth/login", 6)
+            sb.sleep(2)
+            added = 0
+            for c in cookies:
+                # cf_clearance 绑定签发 IP，换机房 IP 后无效，不恢复
+                if c.get('name') == 'cf_clearance':
+                    continue
+                item = {k: c[k] for k in ('name', 'value', 'path', 'domain', 'secure', 'httpOnly', 'expiry') if k in c}
+                try:
+                    sb.driver.add_cookie(item)
+                    added += 1
+                except Exception:
+                    item.pop('domain', None)
+                    try:
+                        sb.driver.add_cookie(item)
+                        added += 1
+                    except Exception as ce:
+                        logger.warning(f"⚠️ 注入 Cookie {c.get('name')} 失败: {str(ce)[:80]}")
+            logger.info(f"🍪 已注入 {added} 个 Cookie，验证会话是否有效...")
+            sb.uc_open_with_reconnect("https://dashboard.katabump.com/dashboard", 6)
+            sb.sleep(3)
+            url = sb.get_current_url()
+            logger.info(f"🍪 会话验证后 URL: {url}")
+            if "login" in url or "auth" in url:
+                logger.warning("⚠️ 已保存会话已失效，回退到账号密码登录")
+                return False
+            logger.info("✅ 已保存会话有效，跳过登录页验证码")
+            return True
+        except Exception as e:
+            logger.warning(f"⚠️ 恢复会话异常: {e}，回退到账号密码登录")
+            return False
+
+    def save_session(self, sb):
+        """导出当前登录态，供 Actions 缓存给下次运行（滚动续命）"""
+        try:
+            cookies = sb.driver.get_cookies()
+            with open(SESSION_FILE, 'w', encoding='utf-8') as f:
+                json.dump(cookies, f, ensure_ascii=False)
+            logger.info(f"💾 已保存 {len(cookies)} 个 Cookie 到 {SESSION_FILE}")
+        except Exception as e:
+            logger.warning(f"⚠️ 保存会话失败: {e}")
+
+    def login_flow(self, sb):
+        """账号密码登录流程（含 Turnstile）。成功返回 True，账号密码错误返回 (False, msg)，其余抛异常"""
         logger.info(f"🚀 访问登录页: {self.masked}")
         sb.uc_open_with_reconnect("https://dashboard.katabump.com/auth/login", 8)
         sb.sleep(3)
@@ -178,6 +249,16 @@ class KataBumpRenew:
             except Exception as read_err:
                 logger.error(f"❌ 读取页面文字失败: {read_err}")
             raise Exception("登录失败 — 仍在登录页，可能验证码未通过")
+        return True
+
+    def process(self, sb):
+        """主续期流程：先复用已保存会话（绕开登录页 Turnstile），失效再账号密码登录"""
+        if not self.restore_session(sb):
+            res = self.login_flow(sb)
+            if res is not True:
+                return res
+        self.save_session(sb)
+
 
         # 进入服务器控制详情
         logger.info(f"🎯 正在进入服务器管理页...")
